@@ -1,6 +1,12 @@
 # 統合レビュー: Minimal ALife Project Overview
 
-2つの独立レビューを統合し、重複を排除・補完して整理したもの。
+> **Document role**: Research review — critiques and recommendations against the initial proposition.
+>
+> **Input**: [`minimal_alife_project_overview.md`](./minimal_alife_project_overview.md) (the initial proposition)
+> **Output**: [`technical_design_spec.md`](./technical_design_spec.md) (design decisions resolving the issues raised here)
+>
+> Two independent reviews were conducted and merged into this unified analysis.
+> Duplicates removed, complementary points consolidated, and prioritized.
 
 ---
 

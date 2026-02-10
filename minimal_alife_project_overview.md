@@ -1,5 +1,13 @@
 # Minimal Artificial Life (ALife) Project Overview
 
+> **Document role**: Initial proposition — the founding vision and conceptual design for the project.
+>
+> **Related documents**:
+> - [`unified_review.md`](./unified_review.md) — Research review that identified gaps, contradictions, and missing definitions in this document
+> - [`technical_design_spec.md`](./technical_design_spec.md) — Concrete design decisions made after considering this document and the review
+
+---
+
 ## 1. Project Vision
 
 This project aims to build a **minimal artificial life system** in which AI agents can:
