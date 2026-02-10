@@ -18,8 +18,8 @@
   - **Hidden pass ratio distribution**: Mean and variance of hidden test performance across runs. Healthy diversity shows spread, not collapse to one mode.
   - **Lifespan distribution**: Mean and variance of agent survival steps. Target: at least 50% of runs survive ≥ 100 steps.
 - **Phased approach**:
-  - **Phase 1**: Single-agent evolution loop, working end-to-end
-  - **Phase 2**: Population of competing agents with selection/diversity dynamics
+  - **Phase 1**: Single-agent evolution loop, working end-to-end. **Honest scope**: Phase 1 is a deterministic code optimizer with survival pressure — not yet an ALife system. Without population dynamics, crossover, or semantic mutation, it cannot exhibit true evolutionary behavior. Its purpose is to validate the infrastructure (sandbox, evaluation, logging, energy model) that Phase 2 builds upon.
+  - **Phase 2**: Population of competing agents with selection, crossover, and diversity maintenance. This is where ALife-like dynamics (strategy divergence, niche formation, arms races) become possible.
 
 ---
 
@@ -29,6 +29,7 @@
 
 The mutation engine operates on Python AST nodes. No LLM API calls during evolution.
 
+- **Implementation**: Use Python's built-in `ast` module for parsing/unparsing and `LibCST` for concrete syntax tree transformations that preserve formatting. `ast` handles structural analysis; `LibCST` handles mutations that need to produce readable output.
 - **Adaptive mutation size**: Start with 1–2 node changes; increase mutation scope when fitness stagnates over a configurable window
 - **Mutation types**: Constant tweaks, operator swaps, guard insertion/removal, statement reordering, expression substitution
 - **No interpretability requirement**: Mutations are not logged with rationale — only the code diff and fitness delta are recorded
@@ -39,6 +40,15 @@ The mutation engine operates on Python AST nodes. No LLM API calls during evolut
 - **Model**: User-specified model via Ollama
 - **Purpose**: Generate initial seed implementation from blank function signature
 - **Scope**: Called once per task to produce the starting organism. Not called during evolution loop.
+
+**Bootstrap simplicity constraint**: The LLM prompt MUST request a naive, minimal implementation (e.g., brute-force, no clever optimizations, simple control flow). Sophisticated LLM output creates a "brain damage" risk — AST mutations are blind local edits that will likely destroy complex semantic structure immediately. The seed should be code that AST mutations can plausibly improve, not code that is already near-optimal.
+
+Example prompt template:
+```
+Write the simplest possible Python implementation of {function_signature}.
+Use only basic loops and conditionals. No helper functions, no imports,
+no optimizations. Prioritize readability over efficiency.
+```
 
 ---
 
@@ -58,13 +68,16 @@ Weights `w1`, `w2` are configurable. Initial values TBD via sensitivity analysis
 
 **Tiebreak rule**: When two candidates have identical fitness, prefer the one with fewer AST nodes (simpler code).
 
-**Weight scaling**: `w2` (edit_cost penalty) decays over time to avoid suppressing beneficial large mutations in later stages:
+**Weight scaling**: `w2` (edit_cost penalty) decays over time to avoid suppressing beneficial large mutations in later stages, but never below a floor to prevent code bloat (a classic Genetic Programming problem where junk code accumulates unchecked):
 
 ```
-w2_effective = w2 * decay_factor ^ step
+w2_effective = max(w2_floor, w2 * decay_factor ^ step)
 ```
 
-`decay_factor` (e.g., 0.999) is configurable. This ensures early evolution favors small safe changes while later evolution permits larger structural shifts.
+- `decay_factor` (e.g., 0.999) is configurable.
+- `w2_floor` (e.g., 0.02) ensures a minimum edit cost penalty always applies, preventing unbounded code growth.
+
+This ensures early evolution favors small safe changes, later evolution permits larger structural shifts, but junk accumulation is always penalized.
 
 ### Anti-Goodhart: Train/Hidden test split
 
@@ -263,9 +276,11 @@ alife_min/
 | `w2` (edit_cost weight) | Penalty for large code changes | 0.1 | Sensitivity analysis |
 | `base_survival_cost` | Energy drain per step | 0.01 | Tune to target ~100-step runs |
 | `improvement_reward` | Energy gain on fitness increase | proportional to Δfitness | Experiment |
-| `N_stagnation` | Steps without improvement before death | 20 | Experiment |
+| `N_stagnation` | Steps without improvement before death | 100 | Experiment |
 | `initial_temperature` | SA starting temperature | 1.0 | Standard SA tuning |
 | `cooling_rate` | SA temperature decay | 0.995 per step | Standard SA tuning |
 | `pass_ratio_threshold` | Minimum train pass_ratio to unlock next task | 0.9 | Experiment |
 | `fitness_threshold` | Minimum overall fitness to unlock next task (pass_ratio - edit_cost) | 0.8 | Experiment |
-| `mutation_stagnation_window` | Steps before increasing mutation size | 10 | Experiment |
+| `mutation_stagnation_window` | Steps before increasing mutation size | 20 | Experiment |
+
+**Timer constraint**: `N_stagnation` MUST be significantly larger than `mutation_stagnation_window` (recommended: ≥ 5x). The adaptive mutation ramp-up needs sufficient runway to attempt larger structural changes before the agent is killed for stagnation. With `mutation_stagnation_window=20` and `N_stagnation=100`, the agent gets ~80 steps of escalating mutation after the first ramp-up — enough time for algorithmic-level changes to take effect.
