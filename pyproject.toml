@@ -1,0 +1,24 @@
+[project]
+name = "alife-core"
+version = "0.1.0"
+description = "Phase 1 minimal ALife runtime"
+requires-python = ">=3.12"
+dependencies = []
+
+[project.scripts]
+alife = "alife_core.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
