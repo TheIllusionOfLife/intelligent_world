@@ -34,6 +34,17 @@ def run_schedule_curve_spike(steps: int = 500) -> dict[str, object]:
     return module.generate_schedule_data(steps=steps)
 
 
+def run_parameter_sweep_spike(
+    output_path: str | None = None,
+    allow_unsafe_process_backend: bool = False,
+) -> list[dict[str, float | int]]:
+    module = _load_script_module("scripts/parameter_sweep.py")
+    return module.run_parameter_sweep(
+        output_path=output_path,
+        allow_unsafe_process_backend=allow_unsafe_process_backend,
+    )
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="alife")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -42,19 +53,36 @@ def build_parser() -> argparse.ArgumentParser:
     run_parser.add_argument("--task", required=True)
     run_parser.add_argument("--config", default="configs/default.yaml")
     run_parser.add_argument("--seed", type=int, default=None)
+    run_parser.add_argument("--bootstrap-backend", choices=["static", "ollama"], default=None)
+    run_parser.add_argument("--ollama-model", default=None)
+    run_parser.add_argument("--unsafe-process-backend", action="store_true")
+    curriculum_group = run_parser.add_mutually_exclusive_group()
+    curriculum_group.add_argument("--curriculum", dest="curriculum", action="store_true")
+    curriculum_group.add_argument("--no-curriculum", dest="curriculum", action="store_false")
+    run_parser.set_defaults(curriculum=None)
 
     spike_parser = subparsers.add_parser("spike")
     spike_subparsers = spike_parser.add_subparsers(dest="spike_command", required=True)
     spike_subparsers.add_parser("docker-latency")
     spike_subparsers.add_parser("ast-feasibility")
     spike_subparsers.add_parser("schedule-curve")
+    sweep_parser = spike_subparsers.add_parser("parameter-sweep")
+    sweep_parser.add_argument("--sweep-output", default=None)
+    sweep_parser.add_argument("--unsafe-process-backend", action="store_true")
 
     return parser
 
 
 def _dispatch(args: argparse.Namespace) -> int:
     if args.command == "run":
-        config = load_run_config(Path(args.config), seed_override=args.seed)
+        config = load_run_config(
+            Path(args.config),
+            seed_override=args.seed,
+            bootstrap_backend_override=args.bootstrap_backend,
+            ollama_model_override=args.ollama_model,
+            run_curriculum_override=args.curriculum,
+            allow_unsafe_process_backend_override=args.unsafe_process_backend,
+        )
         summary = run_experiment(task_name=args.task, config=config, output_root=Path("."))
         print(
             json.dumps(
@@ -78,6 +106,18 @@ def _dispatch(args: argparse.Namespace) -> int:
 
     if args.spike_command == "schedule-curve":
         print(json.dumps(run_schedule_curve_spike(), sort_keys=True))
+        return 0
+
+    if args.spike_command == "parameter-sweep":
+        print(
+            json.dumps(
+                run_parameter_sweep_spike(
+                    output_path=args.sweep_output,
+                    allow_unsafe_process_backend=args.unsafe_process_backend,
+                ),
+                sort_keys=True,
+            )
+        )
         return 0
 
     return 1

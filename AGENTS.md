@@ -12,12 +12,15 @@ Follow `technical_design_spec.md` when adding new runtime modules (`agent/`, `ev
 
 ## Build, Test, and Development Commands
 Use `uv` for Python workflows (no global installs).
-- `uv run pytest`: run unit tests
-- `uv run ruff check .`: lint
-- `uv run ruff format --check .`: formatting check
+- `uv sync --group dev`: sync runtime and dev dependencies
+- `uv run --group dev pytest`: run unit tests
+- `uv run --group dev ruff check .`: lint
+- `uv run --group dev ruff format --check .`: formatting check
 - `uv run alife run --task two_sum_sorted --seed 7`: run CLI entrypoint
 - `uv run alife spike docker-latency`: run Docker latency spike
 - `uv run alife spike ast-feasibility`: run AST feasibility spike
+- `uv run alife spike parameter-sweep`: run parameter tuning sweep
+- `uv run alife spike parameter-sweep --sweep-output sweep_summary.json`: write sweep report artifact
 
 Useful exploration commands:
 - `rg --files`
