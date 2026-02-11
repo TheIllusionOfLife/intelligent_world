@@ -29,7 +29,7 @@ from alife_core.metrics.evolution import (
     ast_shape_fingerprint,
     compute_generation_metrics,
 )
-from alife_core.models import BootstrapBackend, EvolutionMode, OrganismState, RunConfig
+from alife_core.models import BootstrapBackend, EvolutionMode, OrganismState, RunConfig, TaskSpec
 from alife_core.mutation.validation import validate_candidate
 from alife_core.tasks.builtin import load_builtin_tasks
 
@@ -676,7 +676,7 @@ def _crossover_code(parent_a: str, parent_b: str, rng: random.Random) -> str:
 
 def _evaluate_population(
     organisms: list[OrganismState] | list[str],
-    task,
+    task: TaskSpec,
     config: RunConfig,
 ) -> list[OrganismState]:
     normalized: list[OrganismState] = []
@@ -740,7 +740,7 @@ def _evaluate_population(
 
 
 def _initialize_population_for_task(
-    task,
+    task: TaskSpec,
     config: RunConfig,
     rng: random.Random,
     id_counter: list[int],

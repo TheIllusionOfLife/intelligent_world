@@ -145,8 +145,8 @@ def compute_generation_metrics(
         if use_approximate_novelty:
             distances = [
                 _normalized_levenshtein(fingerprint, other)
-                for other in reference_fingerprints
-                if other != fingerprint
+                for jdx, other in enumerate(reference_fingerprints)
+                if jdx != idx
             ]
         else:
             distances = [
