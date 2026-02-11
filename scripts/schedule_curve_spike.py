@@ -9,6 +9,13 @@ def generate_schedule_data(
     decay_factor: float = 0.999,
     w2_floor: float = 0.02,
 ) -> dict[str, object]:
+    if steps < 0:
+        return {
+            "temperature": [],
+            "w2_effective": [],
+            "w2_leads_temperature": False,
+        }
+
     temperature = []
     w2_effective = []
     for step in range(steps + 1):
@@ -17,8 +24,8 @@ def generate_schedule_data(
         temperature.append(temp)
         w2_effective.append(penalty)
 
-    w2_decay_ratio = w2_effective[-1] / w2_effective[0] if w2_effective[0] else 1.0
-    temp_decay_ratio = temperature[-1] / temperature[0] if temperature[0] else 1.0
+    w2_decay_ratio = w2_effective[-1] / w2_effective[0] if w2_effective and w2_effective[0] else 1.0
+    temp_decay_ratio = temperature[-1] / temperature[0] if temperature and temperature[0] else 1.0
 
     return {
         "temperature": temperature,

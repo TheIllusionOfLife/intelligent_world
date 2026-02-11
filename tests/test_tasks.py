@@ -11,3 +11,6 @@ def test_builtin_tasks_include_full_phase1_case_sets() -> None:
     assert len(tasks["run_length_encode"].hidden_cases) >= 5
     assert len(tasks["slugify"].train_cases) >= 10
     assert len(tasks["slugify"].hidden_cases) >= 5
+
+    target_case = (([-3, -1, 0, 4, 7], 3), (2, 4))
+    assert target_case in tasks["two_sum_sorted"].train_cases

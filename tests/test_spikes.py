@@ -18,11 +18,7 @@ def test_docker_latency_handles_zero_iterations() -> None:
 
     assert result["mean_ms"] == 0.0
     assert result["p95_ms"] == 0.0
-    assert result["recommended_strategy"] in {
-        "docker_run_per_eval",
-        "container_reuse",
-        "process_fallback",
-    }
+    assert result["recommended_strategy"] == "unknown"
 
 
 def test_ast_feasibility_handles_zero_samples() -> None:
@@ -42,4 +38,14 @@ def test_schedule_curve_returns_series() -> None:
 
     assert len(result["temperature"]) == 6
     assert len(result["w2_effective"]) == 6
+    assert result["w2_leads_temperature"] is False
+
+
+def test_schedule_curve_handles_negative_steps() -> None:
+    module = _load_script("scripts/schedule_curve_spike.py")
+
+    result = module.generate_schedule_data(steps=-1)
+
+    assert result["temperature"] == []
+    assert result["w2_effective"] == []
     assert result["w2_leads_temperature"] is False

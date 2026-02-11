@@ -3,7 +3,9 @@ name = "alife-core"
 version = "0.1.0"
 description = "Phase 1 minimal ALife runtime"
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    "pyyaml>=6.0.3",
+]
 
 [project.scripts]
 alife = "alife_core.cli:main"

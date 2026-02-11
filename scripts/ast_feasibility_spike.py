@@ -7,8 +7,15 @@ BASE = "def solve(x):\n    return x + 1\n"
 
 def _fitness(source: str) -> float:
     namespace: dict[str, object] = {}
-    exec(compile(source, "<candidate>", "exec"), {}, namespace)  # noqa: S102
-    function = namespace["solve"]
+    try:
+        exec(compile(source, "<candidate>", "exec"), {}, namespace)  # noqa: S102
+        function = namespace["solve"]
+        if not callable(function):
+            return 0.0
+    except (SyntaxError, KeyError, TypeError):
+        return 0.0
+    except Exception:  # noqa: BLE001
+        return 0.0
     passing = 0
     for value in (1, 2, 3, 10):
         if function(value) == value + 1:

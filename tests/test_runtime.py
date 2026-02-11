@@ -25,7 +25,7 @@ def test_load_run_config_reads_yaml_and_applies_seed_override(tmp_path: Path) ->
                 "improvement_multiplier: 1.5",
                 "degradation_multiplier: 1.1",
                 "initial_temperature: 1.0",
-                "cooling_rate: 0.99",
+                "cooling_rate: 9.9e-1  # scientific notation",
                 "w2_floor: 0.02",
                 "decay_factor: 0.999",
                 "mutation_stagnation_window: 3",
@@ -41,6 +41,7 @@ def test_load_run_config_reads_yaml_and_applies_seed_override(tmp_path: Path) ->
     assert loaded.sandbox_backend == "process"
     assert loaded.initial_energy == 1.2
     assert loaded.max_steps == 10
+    assert loaded.cooling_rate == 0.99
 
 
 def test_run_experiment_writes_reproducible_logs_and_artifacts(tmp_path: Path) -> None:

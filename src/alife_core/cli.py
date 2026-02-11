@@ -2,15 +2,18 @@ import argparse
 import importlib.util
 import json
 from pathlib import Path
+from types import ModuleType
 
 from alife_core.runtime import load_run_config, run_experiment
 
+_REPO_ROOT = Path(__file__).resolve().parents[2]
 
-def _load_script_module(path: str):
-    script_path = Path(path)
+
+def _load_script_module(path: str) -> ModuleType:
+    script_path = _REPO_ROOT / path
     spec = importlib.util.spec_from_file_location(script_path.stem, script_path)
     if spec is None or spec.loader is None:
-        raise RuntimeError(f"Unable to load script: {path}")
+        raise RuntimeError(f"Unable to load script: {script_path}")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module

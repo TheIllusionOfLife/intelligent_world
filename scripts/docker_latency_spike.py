@@ -33,7 +33,7 @@ def benchmark(iterations: int = 100) -> dict[str, float | str]:
         return {
             "mean_ms": 0.0,
             "p95_ms": 0.0,
-            "recommended_strategy": _strategy_for_latency(0.0),
+            "recommended_strategy": "unknown",
         }
 
     mean = statistics.fmean(samples)

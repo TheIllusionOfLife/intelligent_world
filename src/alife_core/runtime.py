@@ -1,5 +1,6 @@
 import ast
 import hashlib
+import logging
 import math
 import platform
 import random
@@ -10,6 +11,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+import yaml
+
 from alife_core.agent.curriculum import should_unlock_next_task
 from alife_core.agent.lifecycle import AgentState, apply_step_outcome
 from alife_core.evaluator.core import evaluate_candidate
@@ -17,6 +20,8 @@ from alife_core.logging.events import write_event, write_run_start
 from alife_core.models import RunConfig, TaskSpec
 from alife_core.mutation.validation import validate_candidate
 from alife_core.tasks.builtin import load_builtin_tasks
+
+LOGGER = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -33,23 +38,22 @@ def _coerce_value(raw: str) -> Any:
     if text in {"false", "False"}:
         return False
     try:
-        if "." in text:
-            return float(text)
         return int(text)
     except ValueError:
-        return text
+        try:
+            return float(text)
+        except ValueError:
+            return text
 
 
 def load_run_config(config_path: Path, seed_override: int | None = None) -> RunConfig:
-    values: dict[str, Any] = {}
-    for line in config_path.read_text(encoding="utf-8").splitlines():
-        stripped = line.strip()
-        if not stripped or stripped.startswith("#"):
-            continue
-        key, _, value = stripped.partition(":")
-        if not key or not _:
-            continue
-        values[key.strip()] = _coerce_value(value)
+    loaded = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    if loaded is None:
+        values: dict[str, Any] = {}
+    elif isinstance(loaded, dict):
+        values = loaded
+    else:
+        raise ValueError(f"Config must be a mapping, got: {type(loaded).__name__}")
 
     config = RunConfig(**values)
     if seed_override is not None:
@@ -146,6 +150,7 @@ def _resolve_docker_digest(config: RunConfig) -> str:
             timeout=5,
         )
     except (subprocess.TimeoutExpired, FileNotFoundError):
+        LOGGER.warning("Unable to resolve docker image digest for %s", config.docker_image)
         return "unknown"
     digest = completed.stdout.strip()
     return digest if digest else "unknown"
@@ -161,6 +166,7 @@ def _resolve_git_sha() -> str:
             timeout=2,
         )
     except (subprocess.TimeoutExpired, FileNotFoundError):
+        LOGGER.warning("Unable to resolve framework git SHA")
         return "unknown"
     sha = completed.stdout.strip()
     return sha if sha else "unknown"
@@ -191,141 +197,129 @@ def run_experiment(task_name: str, config: RunConfig, output_root: Path) -> RunS
 
     rng = random.Random(config.seed)
     completed_tasks: list[str] = []
-
     task = tasks[task_name]
-    for task_key in [task_name]:
-        task = tasks[task_key]
-        current_code = _bootstrap_seed(task)
-        validation = validate_candidate(current_code)
+
+    current_code = _bootstrap_seed(task)
+    validation = validate_candidate(current_code)
+    if not validation.is_valid:
+        raise RuntimeError(f"Bootstrap failed validation for {task.name}: {validation.reason}")
+
+    current_eval = evaluate_candidate(current_code, task=task, edit_cost=0.0, config=config)
+    state = AgentState(
+        energy=config.initial_energy,
+        stagnation_steps=0,
+        best_fitness=current_eval.fitness,
+    )
+
+    write_event(
+        log_path,
+        {
+            "type": "step",
+            "task": task.name,
+            "step": 0,
+            "accepted": True,
+            "mutation_rejected": False,
+            "energy": state.energy,
+            "fitness": current_eval.fitness,
+            "fitness_delta": 0.0,
+            "train_pass_ratio": current_eval.train_pass_ratio,
+            "hidden_pass_ratio": current_eval.hidden_pass_ratio,
+            "goodhart_warning": (
+                (current_eval.train_pass_ratio - current_eval.hidden_pass_ratio)
+                > config.goodhart_gap_threshold
+            ),
+            "temperature": _temperature_for_step(config, 0),
+            "w2_effective": _effective_w2(config, 0),
+        },
+    )
+
+    for step in range(1, config.max_steps + 1):
+        mutation_size = 1 + (state.stagnation_steps // max(1, config.mutation_stagnation_window))
+        candidate_code = _mutate_code(current_code, rng, intensity=mutation_size)
+        validation = validate_candidate(candidate_code)
         if not validation.is_valid:
-            raise RuntimeError(f"Bootstrap failed validation for {task.name}: {validation.reason}")
-
-        current_eval = evaluate_candidate(current_code, task=task, edit_cost=0.0, config=config)
-        state = AgentState(
-            energy=config.initial_energy,
-            stagnation_steps=0,
-            best_fitness=current_eval.fitness,
-        )
-
-        write_event(
-            log_path,
-            {
-                "type": "step",
-                "task": task.name,
-                "step": 0,
-                "accepted": True,
-                "mutation_rejected": False,
-                "energy": state.energy,
-                "fitness": current_eval.fitness,
-                "fitness_delta": 0.0,
-                "train_pass_ratio": current_eval.train_pass_ratio,
-                "hidden_pass_ratio": current_eval.hidden_pass_ratio,
-                "goodhart_warning": (
-                    (current_eval.train_pass_ratio - current_eval.hidden_pass_ratio)
-                    > config.goodhart_gap_threshold
-                ),
-                "temperature": _temperature_for_step(config, 0),
-                "w2_effective": _effective_w2(config, 0),
-            },
-        )
-
-        for step in range(1, config.max_steps + 1):
-            mutation_size = 1 + (
-                state.stagnation_steps // max(1, config.mutation_stagnation_window)
-            )
-            candidate_code = _mutate_code(current_code, rng, intensity=mutation_size)
-            validation = validate_candidate(candidate_code)
-            if not validation.is_valid:
-                write_event(
-                    log_path,
-                    {
-                        "type": "step",
-                        "task": task.name,
-                        "step": step,
-                        "accepted": False,
-                        "mutation_rejected": True,
-                        "rejection_stage": validation.stage,
-                        "rejection_reason": validation.reason,
-                        "energy": state.energy,
-                        "fitness": current_eval.fitness,
-                        "fitness_delta": 0.0,
-                        "temperature": _temperature_for_step(config, step),
-                        "w2_effective": _effective_w2(config, step),
-                    },
-                )
-                continue
-
-            edit_cost = compute_ast_edit_cost(current_code, candidate_code)
-            step_config = replace(config, w2_ast_edit_cost=_effective_w2(config, step))
-            candidate_eval = evaluate_candidate(
-                candidate_code,
-                task=task,
-                edit_cost=edit_cost,
-                config=step_config,
-            )
-
-            previous_fitness = current_eval.fitness
-            accepted = candidate_eval.fitness >= previous_fitness
-            if not accepted:
-                loss = max(0.0, previous_fitness - candidate_eval.fitness)
-                temperature = _temperature_for_step(config, step)
-                accepted = rng.random() < math.exp(-loss / temperature)
-
-            state = apply_step_outcome(
-                state=state,
-                accepted=accepted,
-                previous_fitness=previous_fitness,
-                evaluation=candidate_eval,
-                mutation_rejected=False,
-                config=config,
-            )
-
-            if accepted:
-                current_code = candidate_code
-                current_eval = candidate_eval
-                archive_path = organisms_dir / "archive" / run_id / task.name / f"{step}.py"
-                archive_path.parent.mkdir(parents=True, exist_ok=True)
-                archive_path.write_text(current_code, encoding="utf-8")
-
-                current_path = organisms_dir / "current" / f"{task.name}.py"
-                current_path.parent.mkdir(parents=True, exist_ok=True)
-                current_path.write_text(current_code, encoding="utf-8")
-
             write_event(
                 log_path,
                 {
                     "type": "step",
                     "task": task.name,
                     "step": step,
-                    "accepted": accepted,
-                    "mutation_rejected": False,
+                    "accepted": False,
+                    "mutation_rejected": True,
+                    "rejection_stage": validation.stage,
+                    "rejection_reason": validation.reason,
                     "energy": state.energy,
                     "fitness": current_eval.fitness,
-                    "fitness_delta": (candidate_eval.fitness - previous_fitness)
-                    if accepted
-                    else 0.0,
-                    "train_pass_ratio": current_eval.train_pass_ratio,
-                    "hidden_pass_ratio": current_eval.hidden_pass_ratio,
-                    "goodhart_warning": (
-                        (current_eval.train_pass_ratio - current_eval.hidden_pass_ratio)
-                        > config.goodhart_gap_threshold
-                    ),
+                    "fitness_delta": 0.0,
                     "temperature": _temperature_for_step(config, step),
                     "w2_effective": _effective_w2(config, step),
                 },
             )
+            continue
 
-            if state.energy <= 0 or state.stagnation_steps >= config.n_stagnation:
-                break
+        edit_cost = compute_ast_edit_cost(current_code, candidate_code)
+        step_config = replace(config, w2_ast_edit_cost=_effective_w2(config, step))
+        candidate_eval = evaluate_candidate(
+            candidate_code,
+            task=task,
+            edit_cost=edit_cost,
+            config=step_config,
+        )
 
-            if should_unlock_next_task(current_eval, config):
-                completed_tasks.append(task.name)
-                break
-        else:
-            if should_unlock_next_task(current_eval, config):
-                completed_tasks.append(task.name)
+        previous_fitness = current_eval.fitness
+        accepted = candidate_eval.fitness >= previous_fitness
+        if not accepted:
+            loss = max(0.0, previous_fitness - candidate_eval.fitness)
+            temperature = _temperature_for_step(config, step)
+            accepted = rng.random() < math.exp(-loss / temperature)
 
-        if not completed_tasks or completed_tasks[-1] != task.name:
+        state = apply_step_outcome(
+            state=state,
+            accepted=accepted,
+            previous_fitness=previous_fitness,
+            evaluation=candidate_eval,
+            mutation_rejected=False,
+            config=config,
+        )
+
+        if accepted:
+            current_code = candidate_code
+            current_eval = candidate_eval
+            archive_path = organisms_dir / "archive" / run_id / task.name / f"{step}.py"
+            archive_path.parent.mkdir(parents=True, exist_ok=True)
+            archive_path.write_text(current_code, encoding="utf-8")
+
+            current_path = organisms_dir / "current" / f"{task.name}.py"
+            current_path.parent.mkdir(parents=True, exist_ok=True)
+            current_path.write_text(current_code, encoding="utf-8")
+
+        write_event(
+            log_path,
+            {
+                "type": "step",
+                "task": task.name,
+                "step": step,
+                "accepted": accepted,
+                "mutation_rejected": False,
+                "energy": state.energy,
+                "fitness": current_eval.fitness,
+                "fitness_delta": (candidate_eval.fitness - previous_fitness) if accepted else 0.0,
+                "train_pass_ratio": current_eval.train_pass_ratio,
+                "hidden_pass_ratio": current_eval.hidden_pass_ratio,
+                "goodhart_warning": (
+                    (current_eval.train_pass_ratio - current_eval.hidden_pass_ratio)
+                    > config.goodhart_gap_threshold
+                ),
+                "temperature": _temperature_for_step(config, step),
+                "w2_effective": _effective_w2(config, step),
+            },
+        )
+
+        if state.energy <= 0 or state.stagnation_steps >= config.n_stagnation:
+            break
+
+        if should_unlock_next_task(current_eval, config):
+            completed_tasks.append(task.name)
             break
 
     return RunSummary(run_id=run_id, log_path=log_path, completed_tasks=completed_tasks)

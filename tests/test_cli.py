@@ -59,3 +59,11 @@ def test_dispatch_spike_calls_ast_feasibility(monkeypatch) -> None:
 
     assert exit_code == 0
     assert called["ast"] is True
+
+
+def test_spike_loader_is_stable_across_working_directories(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.chdir(tmp_path)
+
+    payload = cli.run_schedule_curve_spike(steps=2)
+
+    assert len(payload["temperature"]) == 3
