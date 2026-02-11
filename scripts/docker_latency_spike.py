@@ -4,7 +4,15 @@ import subprocess
 import time
 
 
-def benchmark(iterations: int = 100) -> dict[str, float]:
+def _strategy_for_latency(mean_ms: float) -> str:
+    if mean_ms < 200:
+        return "docker_run_per_eval"
+    if mean_ms <= 1000:
+        return "container_reuse"
+    return "process_fallback"
+
+
+def benchmark(iterations: int = 100) -> dict[str, float | str]:
     samples: list[float] = []
     for _ in range(iterations):
         start = time.perf_counter()
@@ -22,11 +30,19 @@ def benchmark(iterations: int = 100) -> dict[str, float]:
         samples.append((time.perf_counter() - start) * 1000.0)
 
     if not samples:
-        return {"mean_ms": 0.0, "p95_ms": 0.0}
+        return {
+            "mean_ms": 0.0,
+            "p95_ms": 0.0,
+            "recommended_strategy": "unknown",
+        }
 
     mean = statistics.fmean(samples)
     p95 = sorted(samples)[int(0.95 * (len(samples) - 1))]
-    return {"mean_ms": mean, "p95_ms": p95}
+    return {
+        "mean_ms": mean,
+        "p95_ms": p95,
+        "recommended_strategy": _strategy_for_latency(mean),
+    }
 
 
 if __name__ == "__main__":
