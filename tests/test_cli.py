@@ -1,6 +1,8 @@
 from pathlib import Path
+from types import SimpleNamespace
 
 from alife_core import cli
+from alife_core.models import RunConfig
 
 
 def test_cli_supports_run_and_spike_commands() -> None:
@@ -19,17 +21,22 @@ def test_cli_supports_run_and_spike_commands() -> None:
 def test_dispatch_run_invokes_runtime(monkeypatch, tmp_path: Path) -> None:
     called = {}
 
+    monkeypatch.setattr(
+        cli,
+        "load_run_config",
+        lambda _path, seed_override=None: RunConfig(seed=seed_override or 0),
+    )
+
     def fake_run_experiment(task_name, config, output_root):
         called["task_name"] = task_name
         called["seed"] = config.seed
         called["output_root"] = output_root
 
-        class Summary:
-            run_id = "run-1"
-            log_path = tmp_path / "logs" / "run-1.jsonl"
-            completed_tasks = [task_name]
-
-        return Summary()
+        return SimpleNamespace(
+            run_id="run-1",
+            log_path=tmp_path / "logs" / "run-1.jsonl",
+            completed_tasks=[task_name],
+        )
 
     monkeypatch.setattr(cli, "run_experiment", fake_run_experiment)
 

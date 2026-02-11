@@ -9,7 +9,7 @@ import sys
 from dataclasses import asdict, dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from uuid import uuid4
 
 import yaml
 
@@ -31,25 +31,10 @@ class RunSummary:
     completed_tasks: list[str]
 
 
-def _coerce_value(raw: str) -> Any:
-    text = raw.strip()
-    if text in {"true", "True"}:
-        return True
-    if text in {"false", "False"}:
-        return False
-    try:
-        return int(text)
-    except ValueError:
-        try:
-            return float(text)
-        except ValueError:
-            return text
-
-
 def load_run_config(config_path: Path, seed_override: int | None = None) -> RunConfig:
     loaded = yaml.safe_load(config_path.read_text(encoding="utf-8"))
     if loaded is None:
-        values: dict[str, Any] = {}
+        values: dict[str, object] = {}
     elif isinstance(loaded, dict):
         values = loaded
     else:
@@ -122,20 +107,22 @@ def _bootstrap_seed(task: TaskSpec) -> str:
             "            count = 1\n"
             "    return ''.join(out)\n"
         )
-    return (
-        "def slugify(text):\n"
-        "    text = text.lower()\n"
-        "    chars = []\n"
-        "    prev_dash = False\n"
-        "    for ch in text:\n"
-        "        if ch.isalnum():\n"
-        "            chars.append(ch)\n"
-        "            prev_dash = False\n"
-        "        elif not prev_dash:\n"
-        "            chars.append('-')\n"
-        "            prev_dash = True\n"
-        "    return ''.join(chars).strip('-')\n"
-    )
+    if task.name == "slugify":
+        return (
+            "def slugify(text):\n"
+            "    text = text.lower()\n"
+            "    chars = []\n"
+            "    prev_dash = False\n"
+            "    for ch in text:\n"
+            "        if ch.isalnum():\n"
+            "            chars.append(ch)\n"
+            "            prev_dash = False\n"
+            "        elif not prev_dash:\n"
+            "            chars.append('-')\n"
+            "            prev_dash = True\n"
+            "    return ''.join(chars).strip('-')\n"
+        )
+    raise ValueError(f"Unknown task seed: {task.name}")
 
 
 def _resolve_docker_digest(config: RunConfig) -> str:
@@ -177,7 +164,7 @@ def run_experiment(task_name: str, config: RunConfig, output_root: Path) -> RunS
     if task_name not in tasks:
         raise ValueError(f"Unknown task: {task_name}")
 
-    run_id = datetime.now(UTC).strftime("run-%Y%m%dT%H%M%SZ")
+    run_id = datetime.now(UTC).strftime("run-%Y%m%dT%H%M%S%fZ") + f"-{uuid4().hex[:6]}"
     logs_dir = output_root / "logs"
     organisms_dir = output_root / "organisms"
     log_path = logs_dir / f"{run_id}.jsonl"
@@ -251,6 +238,12 @@ def run_experiment(task_name: str, config: RunConfig, output_root: Path) -> RunS
                     "energy": state.energy,
                     "fitness": current_eval.fitness,
                     "fitness_delta": 0.0,
+                    "train_pass_ratio": current_eval.train_pass_ratio,
+                    "hidden_pass_ratio": current_eval.hidden_pass_ratio,
+                    "goodhart_warning": (
+                        (current_eval.train_pass_ratio - current_eval.hidden_pass_ratio)
+                        > config.goodhart_gap_threshold
+                    ),
                     "temperature": _temperature_for_step(config, step),
                     "w2_effective": _effective_w2(config, step),
                 },
@@ -315,11 +308,11 @@ def run_experiment(task_name: str, config: RunConfig, output_root: Path) -> RunS
             },
         )
 
-        if state.energy <= 0 or state.stagnation_steps >= config.n_stagnation:
-            break
-
         if should_unlock_next_task(current_eval, config):
             completed_tasks.append(task.name)
+            break
+
+        if state.energy <= 0 or state.stagnation_steps >= config.n_stagnation:
             break
 
     return RunSummary(run_id=run_id, log_path=log_path, completed_tasks=completed_tasks)

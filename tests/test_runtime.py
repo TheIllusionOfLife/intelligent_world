@@ -71,3 +71,17 @@ def test_run_experiment_writes_reproducible_logs_and_artifacts(tmp_path: Path) -
 
     assert any(item["type"] == "step" for item in payloads)
     assert summary.completed_tasks == ["two_sum_sorted"]
+
+
+def test_run_experiment_generates_unique_run_ids(tmp_path: Path) -> None:
+    config = RunConfig(
+        seed=7,
+        sandbox_backend="process",
+        max_steps=1,
+        n_stagnation=1,
+    )
+
+    first = run_experiment(task_name="two_sum_sorted", config=config, output_root=tmp_path)
+    second = run_experiment(task_name="two_sum_sorted", config=config, output_root=tmp_path)
+
+    assert first.run_id != second.run_id

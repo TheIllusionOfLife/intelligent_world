@@ -64,6 +64,7 @@ def load_builtin_tasks() -> dict[str, TaskSpec]:
                 (("UPPERCASE",), "uppercase"),
                 (("foo---bar",), "foo-bar"),
                 (("...leading and trailing...",), "leading-and-trailing"),
+                # Intentionally strips non-ASCII characters rather than transliterating.
                 (("café résumé",), "caf-rsum"),
                 (("one",), "one"),
             ),

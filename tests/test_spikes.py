@@ -1,9 +1,11 @@
 import importlib.util
 from pathlib import Path
 
+REPO_ROOT = Path(__file__).resolve().parents[1]
+
 
 def _load_script(path: str):
-    script_path = Path(path)
+    script_path = REPO_ROOT / path
     spec = importlib.util.spec_from_file_location(script_path.stem, script_path)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
@@ -29,6 +31,14 @@ def test_ast_feasibility_handles_zero_samples() -> None:
     assert result["syntactic_validity_rate"] == 0.0
     assert result["semantic_difference_proxy_rate"] == 0.0
     assert result["fitness_improvement_rate"] == 0.0
+
+
+def test_ast_feasibility_reports_non_zero_improvement_rate_for_default_seed() -> None:
+    module = _load_script("scripts/ast_feasibility_spike.py")
+
+    result = module.run_spike(samples=100, seed=0)
+
+    assert result["fitness_improvement_rate"] > 0.0
 
 
 def test_schedule_curve_returns_series() -> None:

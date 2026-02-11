@@ -2,7 +2,7 @@
 import ast
 import random
 
-BASE = "def solve(x):\n    return x + 1\n"
+BASE = "def solve(x):\n    return x + 0\n"
 
 
 def _fitness(source: str) -> float:

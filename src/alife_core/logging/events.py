@@ -8,7 +8,7 @@ from alife_core.models import RunConfig
 def write_event(log_path: Path, payload: dict[str, object]) -> None:
     log_path.parent.mkdir(parents=True, exist_ok=True)
     with log_path.open("a", encoding="utf-8") as file_obj:
-        file_obj.write(json.dumps(payload, sort_keys=True) + "\n")
+        file_obj.write(json.dumps(payload, sort_keys=True, default=str) + "\n")
 
 
 def write_run_start(
