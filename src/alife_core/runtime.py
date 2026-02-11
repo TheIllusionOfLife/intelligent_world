@@ -282,7 +282,7 @@ def run_experiment(task_name: str, config: RunConfig, output_root: Path) -> RunS
                 state,
                 energy=round(max(0.0, state.energy - config.base_survival_cost), 10),
                 stagnation_steps=0,
-                best_fitness=max(state.best_fitness, current_eval.fitness),
+                best_fitness=current_eval.fitness,
             )
         archive_path = organisms_dir / "archive" / run_id / task.name / "0.py"
         archive_path.parent.mkdir(parents=True, exist_ok=True)

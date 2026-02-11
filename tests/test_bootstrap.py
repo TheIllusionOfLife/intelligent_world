@@ -50,9 +50,32 @@ def test_generate_seed_falls_back_to_static_when_enabled(monkeypatch) -> None:
 
     monkeypatch.setattr(bootstrap, "_generate_ollama_seed", fail_ollama)
 
-    seed = generate_seed(task, config)
+    try:
+        generate_seed(task, config)
+    except BootstrapError as exc:
+        assert "failure" in str(exc)
+    else:
+        raise AssertionError("expected BootstrapError")
 
-    assert "def run_length_encode" in seed
+
+def test_extract_python_code_joins_multiple_python_blocks() -> None:
+    from alife_core.bootstrap import _extract_python_code
+
+    text = (
+        "preface\n"
+        "```python\n"
+        "def a():\n    return 1\n"
+        "```\n"
+        "middle\n"
+        "```python\n"
+        "def b():\n    return 2\n"
+        "```\n"
+    )
+
+    code = _extract_python_code(text)
+
+    assert "def a" in code
+    assert "def b" in code
 
 
 def test_generate_ollama_seed_requires_function_name(monkeypatch) -> None:

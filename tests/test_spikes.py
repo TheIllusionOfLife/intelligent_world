@@ -122,3 +122,30 @@ def test_parameter_sweep_rejects_process_backend_without_unsafe_opt_in(tmp_path:
         assert "unsafe" in str(exc)
     else:
         raise AssertionError("expected ValueError for process backend without opt-in")
+
+
+def test_parameter_sweep_respects_task_name_argument(tmp_path: Path) -> None:
+    module = _load_script("scripts/parameter_sweep.py")
+    called = {"task_names": []}
+
+    def fake_run_experiment(task_name, config, output_root):
+        _ = config
+        _ = output_root
+        called["task_names"].append(task_name)
+
+        class Summary:
+            completed_tasks = [task_name]
+
+        return Summary()
+
+    module.run_experiment = fake_run_experiment
+
+    module.run_parameter_sweep(
+        task_name="slugify",
+        output_root=tmp_path,
+        seeds=[0],
+        grid=[{"n_stagnation": 1, "mutation_stagnation_window": 1}],
+        max_steps=1,
+    )
+
+    assert called["task_names"] == ["slugify"]

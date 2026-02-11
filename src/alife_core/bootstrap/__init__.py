@@ -58,11 +58,15 @@ def static_seed(task: TaskSpec) -> str:
 def _extract_python_code(text: str) -> str:
     marker = "```python"
     if marker in text:
-        after = text.split(marker, maxsplit=1)[1]
-        return after.split("```", maxsplit=1)[0].strip() + "\n"
+        blocks = []
+        for part in text.split(marker)[1:]:
+            blocks.append(part.split("```", maxsplit=1)[0].strip())
+        return "\n\n".join(block for block in blocks if block).strip() + "\n"
     if "```" in text:
-        after = text.split("```", maxsplit=1)[1]
-        return after.split("```", maxsplit=1)[0].strip() + "\n"
+        blocks = []
+        for part in text.split("```")[1:]:
+            blocks.append(part.split("```", maxsplit=1)[0].strip())
+        return "\n\n".join(block for block in blocks if block).strip() + "\n"
     return text.strip() + "\n"
 
 
@@ -114,10 +118,4 @@ def _generate_ollama_seed(task: TaskSpec, config: RunConfig) -> str:
 def generate_seed(task: TaskSpec, config: RunConfig) -> str:
     if config.bootstrap_backend == "static":
         return static_seed(task)
-
-    try:
-        return _generate_ollama_seed(task, config)
-    except BootstrapError:
-        if not config.bootstrap_fallback_to_static:
-            raise
-        return static_seed(task)
+    return _generate_ollama_seed(task, config)

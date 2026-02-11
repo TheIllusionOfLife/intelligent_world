@@ -9,6 +9,7 @@ from alife_core.runtime import run_experiment
 
 
 def run_parameter_sweep(
+    task_name: str = "two_sum_sorted",
     output_root: Path | str = Path("."),
     output_path: Path | str | None = None,
     seeds: list[int] | None = None,
@@ -52,7 +53,7 @@ def run_parameter_sweep(
                 mutation_stagnation_window=params["mutation_stagnation_window"],
             )
             summary = run_experiment(
-                task_name="two_sum_sorted",
+                task_name=task_name,
                 config=config,
                 output_root=sweep_root / "sweep_runs",
             )
