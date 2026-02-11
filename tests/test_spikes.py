@@ -59,3 +59,66 @@ def test_schedule_curve_handles_negative_steps() -> None:
     assert result["temperature"] == []
     assert result["w2_effective"] == []
     assert result["w2_leads_temperature"] is False
+
+
+def test_parameter_sweep_returns_rows(tmp_path: Path) -> None:
+    module = _load_script("scripts/parameter_sweep.py")
+
+    rows = module.run_parameter_sweep(
+        output_root=tmp_path,
+        seeds=[0],
+        grid=[
+            {
+                "n_stagnation": 1,
+                "mutation_stagnation_window": 1,
+            }
+        ],
+        max_steps=1,
+    )
+
+    assert len(rows) == 1
+    assert rows[0]["n_stagnation"] == 1
+    assert "median_completed_tasks" in rows[0]
+
+
+def test_parameter_sweep_uses_docker_by_default(tmp_path: Path) -> None:
+    module = _load_script("scripts/parameter_sweep.py")
+    called = {"backends": []}
+
+    def fake_run_experiment(task_name, config, output_root):
+        _ = task_name
+        _ = output_root
+        called["backends"].append(config.sandbox_backend)
+
+        class Summary:
+            completed_tasks = ["two_sum_sorted"]
+
+        return Summary()
+
+    module.run_experiment = fake_run_experiment
+
+    module.run_parameter_sweep(
+        output_root=tmp_path,
+        seeds=[0],
+        grid=[{"n_stagnation": 1, "mutation_stagnation_window": 1}],
+        max_steps=1,
+    )
+
+    assert called["backends"] == ["docker"]
+
+
+def test_parameter_sweep_rejects_process_backend_without_unsafe_opt_in(tmp_path: Path) -> None:
+    module = _load_script("scripts/parameter_sweep.py")
+
+    try:
+        module.run_parameter_sweep(
+            output_root=tmp_path,
+            seeds=[0],
+            grid=[{"n_stagnation": 1, "mutation_stagnation_window": 1}],
+            max_steps=1,
+            sandbox_backend="process",
+        )
+    except ValueError as exc:
+        assert "unsafe" in str(exc)
+    else:
+        raise AssertionError("expected ValueError for process backend without opt-in")

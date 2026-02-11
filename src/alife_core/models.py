@@ -3,6 +3,7 @@ from typing import Literal
 
 Case = tuple[tuple, object]
 SandboxBackend = Literal["docker", "process"]
+BootstrapBackend = Literal["static", "ollama"]
 
 
 @dataclass(frozen=True)
@@ -31,6 +32,15 @@ class RunConfig:
 
     mutation_stagnation_window: int = 20
     goodhart_gap_threshold: float = 0.2
+
+    bootstrap_backend: BootstrapBackend = "ollama"
+    ollama_model: str = "gpt-oss:20b"
+    bootstrap_timeout_seconds: float = 20.0
+    bootstrap_fallback_to_static: bool = True
+
+    run_curriculum: bool = False
+    viability_window: int = 20
+    viability_min_improvement_rate: float = 0.05
 
 
 @dataclass(frozen=True)

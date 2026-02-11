@@ -22,3 +22,11 @@ decay_factor: 0.999
 
 mutation_stagnation_window: 20
 goodhart_gap_threshold: 0.2
+
+bootstrap_backend: ollama
+ollama_model: gpt-oss:20b
+bootstrap_timeout_seconds: 20.0
+bootstrap_fallback_to_static: true
+run_curriculum: false
+viability_window: 20
+viability_min_improvement_rate: 0.05
