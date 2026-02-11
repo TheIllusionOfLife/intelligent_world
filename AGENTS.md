@@ -23,7 +23,13 @@ uv run alife spike parameter-sweep
 Commands agents often miss:
 - Population mode run:
 ```bash
-uv run alife run --task two_sum_sorted --population --population-size 12 --elite-count 3 --max-generations 30 --population-workers 4
+uv run alife run \
+  --task two_sum_sorted \
+  --population \
+  --population-size 12 \
+  --elite-count 3 \
+  --max-generations 30 \
+  --population-workers 4
 ```
 - Unsafe process backend opt-in (must be explicit):
 ```bash

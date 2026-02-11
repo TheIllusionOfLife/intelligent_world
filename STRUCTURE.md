@@ -45,5 +45,6 @@
 - Runtime artifacts:
   - `logs/`
   - `organisms/`
+  - `sweep_runs/`
   - optional sweep outputs (for example `sweep_summary.json`)
 - These should not be committed and are ignored via `.gitignore`.
