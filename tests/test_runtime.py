@@ -614,3 +614,24 @@ def test_run_experiment_rejects_invalid_population_workers(tmp_path: Path) -> No
         assert "population_workers" in str(exc)
     else:
         raise AssertionError("expected ValueError for invalid population_workers")
+
+
+def test_load_run_config_rejects_invalid_elite_count_for_population_mode(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        "\n".join(
+            [
+                "evolution_mode: population",
+                "population_size: 4",
+                "elite_count: 4",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    try:
+        load_run_config(config_path)
+    except ValueError as exc:
+        assert "elite_count" in str(exc)
+    else:
+        raise AssertionError("expected ValueError for invalid elite_count")

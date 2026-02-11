@@ -103,8 +103,11 @@ def _validate_run_config(config: RunConfig) -> None:
         raise ValueError("tournament_k must be >= 1")
     if config.max_generations < 0:
         raise ValueError("max_generations must be >= 0")
-    if config.population_size < 2 and config.evolution_mode == "population":
-        raise ValueError("population_size must be at least 2 for population mode")
+    if config.evolution_mode == "population":
+        if config.population_size < 2:
+            raise ValueError("population_size must be at least 2 for population mode")
+        if not 1 <= config.elite_count < config.population_size:
+            raise ValueError("elite_count must be >= 1 and < population_size")
 
 
 def _temperature_for_step(config: RunConfig, step: int) -> float:
@@ -279,8 +282,6 @@ def _ensure_docker_daemon_available(config: RunConfig) -> None:
 
 
 def run_single_agent_experiment(task_name: str, config: RunConfig, output_root: Path) -> RunSummary:
-    _validate_run_config(config)
-    _ensure_docker_daemon_available(config)
     if (
         config.sandbox_backend == "process"
         and config.bootstrap_backend == "ollama"
@@ -672,7 +673,7 @@ def _initialize_population_for_task(task, config: RunConfig, rng: random.Random)
 
     population_codes = [bootstrap_code]
     attempts = 0
-    while len(population_codes) < max(1, config.population_size):
+    while len(population_codes) < config.population_size:
         attempts += 1
         if attempts > config.population_size * 20:
             population_codes.append(bootstrap_code)
@@ -684,8 +685,6 @@ def _initialize_population_for_task(task, config: RunConfig, rng: random.Random)
 
 
 def run_population_experiment(task_name: str, config: RunConfig, output_root: Path) -> RunSummary:
-    _validate_run_config(config)
-    _ensure_docker_daemon_available(config)
     if (
         config.sandbox_backend == "process"
         and config.bootstrap_backend == "ollama"
@@ -698,11 +697,6 @@ def run_population_experiment(task_name: str, config: RunConfig, output_root: Pa
     tasks = load_builtin_tasks()
     if task_name not in tasks:
         raise ValueError(f"Unknown task: {task_name}")
-    if config.population_size < 2:
-        raise ValueError("population_size must be at least 2 for population mode")
-    if config.elite_count < 1 or config.elite_count >= config.population_size:
-        raise ValueError("elite_count must be >= 1 and < population_size")
-
     run_id = datetime.now(UTC).strftime("run-%Y%m%dT%H%M%S%fZ") + f"-{uuid4().hex[:6]}"
     logs_dir = output_root / "logs"
     organisms_dir = output_root / "organisms"
@@ -871,6 +865,7 @@ def run_population_experiment(task_name: str, config: RunConfig, output_root: Pa
 
 def run_experiment(task_name: str, config: RunConfig, output_root: Path) -> RunSummary:
     _validate_run_config(config)
+    _ensure_docker_daemon_available(config)
     if config.evolution_mode == "population":
         return run_population_experiment(
             task_name=task_name, config=config, output_root=output_root
