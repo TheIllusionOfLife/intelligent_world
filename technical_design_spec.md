@@ -34,6 +34,25 @@ The mutation engine operates on Python AST nodes. No LLM API calls during evolut
 - **Mutation types**: Constant tweaks, operator swaps, guard insertion/removal, statement reordering, expression substitution
 - **No interpretability requirement**: Mutations are not logged with rationale — only the code diff and fitness delta are recorded
 
+**Mutation validation gate**: Every mutation MUST pass through a validation pipeline before reaching the evaluator:
+1. `ast.parse()` — reject if syntactically invalid (zero-cost check)
+2. `compile()` — reject if not compilable
+3. AST static analysis — reject if violates sandbox constraints (Section 6)
+
+Only mutations surviving all three gates are sent to the Docker evaluator. Failed mutations are logged as `"mutation_rejected": true` with the rejection stage, but do NOT cost energy or count toward stagnation.
+
+**Feasibility risk & fallback**: AST mutations on Python code have an unverified viability rate. If the viable-mutation-to-improvement ratio is too low (<5%), agents will die before meaningful evolution occurs.
+
+**Required pre-implementation spike**: Before building the mutation engine, run a standalone feasibility test — apply 100 random AST mutations to a simple function and measure:
+- (a) Syntactic validity rate
+- (b) Semantic difference rate (output changes)
+- (c) Fitness improvement rate
+
+**Fallback strategy** (activate if viability rate <5%):
+- **Tier 1**: Add a syntax repair pass (re-parse, auto-fix common errors) between mutation and validation
+- **Tier 2**: Supplement with template-based mutations — a library of parameterized, guaranteed-valid code transformations (e.g., "replace `for` loop with `while`", "add boundary check for empty input")
+- **Tier 3**: Reintroduce local LLM for mutation (not just bootstrap) if programmatic approaches prove insufficient
+
 ### Bootstrap: Local LLM (one-time)
 
 - **Tool**: Ollama (already installed)
@@ -114,7 +133,13 @@ Without these fields, a run is considered non-reproducible and should be exclude
 ### Energy model
 
 - Initial energy: `1.0` (scale TBD via experimentation)
-- Per-step: base survival cost reduces energy; fitness improvement increases energy; fitness degradation reduces energy
+- Per-step energy update (additive):
+  ```
+  energy -= base_survival_cost                          # always drained
+  energy += improvement_multiplier * max(0, Δfitness)   # reward on improvement
+  energy -= degradation_multiplier * max(0, -Δfitness)  # penalty on regression
+  ```
+  Where `Δfitness = new_fitness - old_fitness`. Both multipliers are configurable. `improvement_multiplier` and `degradation_multiplier` default to `1.0` — meaning a +0.05 fitness gain restores 0.05 energy, and a -0.05 regression costs 0.05 energy, independent of current energy level.
 - **Death**: Energy ≤ 0, or no improvement for N steps (configurable), or resource budget exceeded
 
 ### Death is permanent (Phase 1)
@@ -133,6 +158,12 @@ Without these fields, a run is considered non-reproducible and should be exclude
   This ensures `loss` is always non-negative, so the exponent is always ≤ 0, and acceptance probability is always in (0, 1]. Larger degradations yield lower acceptance probability.
 - Temperature decreases on a configurable schedule (linear or exponential decay)
 
+**Stability constraint (SA cooling vs w2 decay interaction)**: SA temperature decay makes the agent increasingly intolerant of fitness regression, while w2 decay encourages larger structural changes. These forces move in opposite directions — the system becomes simultaneously more accepting of big edits AND less forgiving of bad outcomes. This creates a potential "death cliff" where one bad large mutation is fatal.
+
+To mitigate:
+- **Coupled schedules**: w2 decay MUST NOT outpace SA cooling. Formally: at any step, if w2 has decayed by X%, temperature should have decayed by at most X%. This ensures the agent never permits large mutations it cannot survive failing.
+- **Pre-implementation visualization**: Before running experiments, plot both curves (w2_effective and temperature) over 500 steps with the chosen parameters. Verify visually that the w2 curve never leads the temperature curve by more than one phase.
+
 ---
 
 ## 5. Task Design
@@ -143,15 +174,110 @@ Tasks are presented in order of increasing difficulty. Agent must satisfy **both
 
 ### Initial task set
 
-1. **two_sum_sorted** — Find indices of two numbers summing to target (sorted input)
-2. **run_length_encode** — Compress string via run-length encoding
-3. **slugify** — Convert text to URL-safe slug
+#### Task 1: two_sum_sorted
+
+```python
+def two_sum_sorted(numbers: list[int], target: int) -> tuple[int, int]:
+    """Return 1-based indices of two numbers that sum to target. Input is sorted ascending."""
+```
+
+Train tests:
+```python
+assert two_sum_sorted([2, 7, 11, 15], 9) == (1, 2)
+assert two_sum_sorted([1, 2, 3, 4, 5], 8) == (3, 5)
+assert two_sum_sorted([-3, -1, 0, 4, 7], 3) == (1, 5)
+assert two_sum_sorted([1, 1, 1, 1, 5], 6) == (1, 5)
+assert two_sum_sorted([1, 2], 3) == (1, 2)
+assert two_sum_sorted([-5, -3, 0, 2, 8], -8) == (1, 2)
+assert two_sum_sorted([1, 3, 5, 7, 9, 11], 12) == (1, 6)
+assert two_sum_sorted([0, 0, 3, 4], 0) == (1, 2)
+assert two_sum_sorted([1, 2, 3, 4, 5, 6, 7, 8, 9, 10], 19) == (9, 10)
+assert two_sum_sorted([10, 20, 30, 40, 50], 70) == (2, 5)
+```
+
+Hidden tests:
+```python
+assert two_sum_sorted([1, 5, 8, 11, 14], 19) == (2, 5)
+assert two_sum_sorted([-10, -5, 0, 5, 10], 0) == (1, 5)
+assert two_sum_sorted([3, 3], 6) == (1, 2)
+assert two_sum_sorted([1, 4, 6, 8, 10, 12], 14) == (2, 5)
+assert two_sum_sorted(list(range(1, 101)), 101) == (1, 100)
+```
+
+#### Task 2: run_length_encode
+
+```python
+def run_length_encode(s: str) -> str:
+    """Compress string using run-length encoding. Single chars have no count prefix."""
+```
+
+Train tests:
+```python
+assert run_length_encode("aabbbcccc") == "a2b3c4"
+assert run_length_encode("abc") == "abc"
+assert run_length_encode("") == ""
+assert run_length_encode("aaaa") == "a4"
+assert run_length_encode("a") == "a"
+assert run_length_encode("aabb") == "a2b2"
+assert run_length_encode("aaabba") == "a3b2a"
+assert run_length_encode("zzzzzzzzzz") == "z10"
+assert run_length_encode("abababab") == "abababab"
+assert run_length_encode("aaaaabbbbbccccc") == "a5b5c5"
+```
+
+Hidden tests:
+```python
+assert run_length_encode("xxyyxxyyxx") == "x2y2x2y2x2"
+assert run_length_encode("aaaaaaaaaaaa") == "a12"
+assert run_length_encode("abcabcabc") == "abcabcabc"
+assert run_length_encode("aaabbbccc") == "a3b3c3"
+assert run_length_encode("z") == "z"
+```
+
+#### Task 3: slugify
+
+```python
+def slugify(text: str) -> str:
+    """Convert text to URL-safe slug: lowercase, alphanumeric + hyphens, no leading/trailing/double hyphens."""
+```
+
+Train tests:
+```python
+assert slugify("Hello World") == "hello-world"
+assert slugify("  Hello   World  ") == "hello-world"
+assert slugify("Python 3.12 Released!") == "python-312-released"
+assert slugify("") == ""
+assert slugify("already-slugified") == "already-slugified"
+assert slugify("UPPERCASE") == "uppercase"
+assert slugify("foo---bar") == "foo-bar"
+assert slugify("...leading and trailing...") == "leading-and-trailing"
+assert slugify("café résumé") == "caf-rsum"
+assert slugify("one") == "one"
+```
+
+Hidden tests:
+```python
+assert slugify("  ") == ""
+assert slugify("---") == ""
+assert slugify("Hello, World! How's it going?") == "hello-world-hows-it-going"
+assert slugify("under_score_test") == "under-score-test"
+assert slugify("MiXeD CaSe 123") == "mixed-case-123"
+```
 
 ### Initial state: Blank slate + LLM bootstrap
 
 - Agent starts with only the function signature
 - Local LLM generates the first seed implementation
 - All subsequent evolution is AST-mutation only
+
+**Bootstrap validation gate**: The LLM-generated seed MUST pass a minimum quality check before evolution begins:
+1. Must be syntactically valid (`ast.parse()` succeeds)
+2. Must pass sandbox static analysis (Section 6)
+3. Must pass at least 1 train test (non-zero `pass_ratio`)
+
+If the seed fails validation:
+- **Retry**: Re-prompt the LLM up to 3 times with the error message appended to the prompt
+- **Fallback**: If all retries fail, use a hardcoded minimal stub that returns a type-correct default (e.g., `return (1, 2)` for two_sum_sorted). This guarantees evolution can start, even from a very low fitness baseline
 
 ---
 
@@ -163,6 +289,16 @@ Tasks are presented in order of increasing difficulty. Agent must satisfy **both
 - Resource limits: CPU time, memory, no network access, read-only filesystem (except working dir)
 - Timeout enforced at both Docker and subprocess level
 - No direct `docker-py` dependency — plain subprocess calls to `docker` CLI
+
+**Required pre-implementation benchmark**: Time 100 sequential `docker run` calls with a trivial Python script (`print("ok")`) on the target macOS machine. Docker Desktop on macOS has significant startup latency per container.
+
+**Latency mitigation strategy** (activate based on benchmark results):
+
+| Per-call latency | Strategy |
+|-----------------|----------|
+| < 200ms | Proceed with `docker run` per evaluation. No changes needed. |
+| 200ms–1s | **Container reuse**: Keep a long-running container alive, copy organism code in via `docker cp`, execute via `docker exec`. Same security constraints apply (re-create container every N evals to prevent state leakage). |
+| > 1s | **Phase 1 fallback**: Use `subprocess` with `resource` module limits (ulimit) + AST static analysis as primary sandbox. Accept marginally lower isolation for Phase 1. Migrate to Docker in Phase 2 when iteration speed is less critical. |
 
 ### Constraints on organism code
 
@@ -255,7 +391,22 @@ alife_min/
 
 ---
 
-## 9. Decisions Deferred to Phase 2
+## 9. Pre-Implementation Spikes (Required)
+
+These spikes MUST be completed before writing the main system. They validate critical assumptions and produce data needed for parameter calibration.
+
+| Spike | Duration | Deliverable | Go/No-Go Criterion |
+|-------|----------|-------------|---------------------|
+| **AST mutation feasibility** | 1–2 days | Standalone script: 100 random mutations on a simple function. Report syntactic validity rate, semantic difference rate, fitness improvement rate. | Viable mutation rate ≥ 5%. If below, activate fallback tiers (Section 2). |
+| **Task definition validation** | 0.5 day | All 3 tasks: function signatures, train tests, hidden tests committed and passing with a hand-written reference solution. | All train + hidden tests pass against reference solutions. |
+| **Docker latency benchmark** | 0.5 day | Benchmark script: 100 sequential `docker run` calls on target macOS machine. Report mean/p95 latency. | Latency ≤ 200ms/call for `docker run` path. Otherwise activate mitigation (Section 6). |
+| **SA/w2 curve visualization** | 0.5 day | Plot temperature and w2_effective over 500 steps with initial parameter guesses. Verify stability constraint (Section 4). | w2 curve never leads temperature curve by more than one phase. |
+
+**Recommended order**: Task definitions → Docker benchmark → AST feasibility → Curve visualization.
+
+---
+
+## 10. Decisions Deferred to Phase 2
 
 | Topic | Phase 1 Status | Phase 2 Plan |
 |-------|---------------|--------------|
@@ -268,14 +419,16 @@ alife_min/
 
 ---
 
-## 10. Open Parameters (To Be Determined Empirically)
+## 11. Open Parameters (To Be Determined Empirically)
 
 | Parameter | Description | Initial Guess | Method |
 |-----------|-------------|---------------|--------|
 | `w1` (pass_ratio weight) | Importance of test passing | 0.9 | Sensitivity analysis |
 | `w2` (edit_cost weight) | Penalty for large code changes | 0.1 | Sensitivity analysis |
 | `base_survival_cost` | Energy drain per step | 0.01 | Tune to target ~100-step runs |
-| `improvement_reward` | Energy gain on fitness increase | proportional to Δfitness | Experiment |
+| `improvement_multiplier` | Energy gain per unit of positive Δfitness (additive) | 1.0 | Experiment |
+| `degradation_multiplier` | Energy loss per unit of negative Δfitness (additive) | 1.0 | Experiment |
+| `w2_floor` | Minimum edit cost penalty (prevents code bloat) | 0.02 | Experiment |
 | `N_stagnation` | Steps without improvement before death | 100 | Experiment |
 | `initial_temperature` | SA starting temperature | 1.0 | Standard SA tuning |
 | `cooling_rate` | SA temperature decay | 0.995 per step | Standard SA tuning |
@@ -284,3 +437,30 @@ alife_min/
 | `mutation_stagnation_window` | Steps before increasing mutation size | 20 | Experiment |
 
 **Timer constraint**: `N_stagnation` MUST be significantly larger than `mutation_stagnation_window` (recommended: ≥ 5x). The adaptive mutation ramp-up needs sufficient runway to attempt larger structural changes before the agent is killed for stagnation. With `mutation_stagnation_window=20` and `N_stagnation=100`, the agent gets ~80 steps of escalating mutation after the first ramp-up — enough time for algorithmic-level changes to take effect.
+
+### Parameter tuning protocol
+
+These 10+ parameters interact non-linearly. Tuning them all at once is intractable. Follow this phased protocol:
+
+**Phase A — Fix structural parameters first** (single task: `two_sum_sorted`):
+
+| Priority | Parameters | Sweep range | Success metric |
+|----------|-----------|-------------|----------------|
+| 1st | `N_stagnation`, `mutation_stagnation_window` | 50/10, 100/20, 200/40 | Agent survives >50 steps |
+| 2nd | `base_survival_cost`, `improvement_reward` | cost: 0.005–0.05; reward: 0.5x–2.0x Δfitness | Median lifespan ~100 steps |
+| 3rd | `initial_temperature`, `cooling_rate` | temp: 0.5–2.0; rate: 0.99–0.999 | Acceptance rate settles between 10–30% by step 100 |
+
+**Phase B — Tune fitness weights** (all tasks):
+
+| Priority | Parameters | Sweep range | Success metric |
+|----------|-----------|-------------|----------------|
+| 4th | `w1`, `w2`, `w2_floor` | w1: 0.8–1.0; w2: 0.05–0.2; floor: 0.01–0.05 | Fitness improves monotonically over first 50 steps |
+| 5th | `decay_factor` | 0.995–0.9999 | No code bloat (AST node count stays within 2x of seed) |
+
+**Phase C — Validate curriculum thresholds**:
+
+| Priority | Parameters | Sweep range | Success metric |
+|----------|-----------|-------------|----------------|
+| 6th | `pass_ratio_threshold`, `fitness_threshold` | pass: 0.7–0.9; fitness: 0.6–0.8 | Agent advances to task 2 within 200 steps |
+
+Each sweep: 5 runs per configuration, same seed set. Compare median lifespan and final fitness. Fix the winner before moving to the next priority.
