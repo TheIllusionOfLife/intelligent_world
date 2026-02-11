@@ -31,3 +31,14 @@ allow_unsafe_process_backend: false
 run_curriculum: false
 viability_window: 20
 viability_min_improvement_rate: 0.05
+
+evolution_mode: single_agent
+population_size: 8
+elite_count: 2
+tournament_k: 3
+crossover_rate: 0.7
+mutation_rate: 0.9
+max_generations: 50
+population_workers: 4
+diversity_window: 5
+min_diversity_score: 0.2

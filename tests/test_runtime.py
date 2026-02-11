@@ -346,3 +346,271 @@ def test_mutate_constant_supports_float_literals() -> None:
 
     assert changed is True
     assert "0.5" not in rendered
+
+
+def test_run_experiment_population_mode_writes_generation_events(tmp_path: Path) -> None:
+    config = RunConfig(
+        seed=3,
+        sandbox_backend="process",
+        bootstrap_backend="static",
+        evolution_mode="population",
+        population_size=4,
+        elite_count=1,
+        tournament_k=2,
+        crossover_rate=0.5,
+        mutation_rate=0.9,
+        max_generations=3,
+    )
+
+    summary = run_experiment(task_name="two_sum_sorted", config=config, output_root=tmp_path)
+    payloads = [
+        json.loads(line) for line in summary.log_path.read_text(encoding="utf-8").splitlines()
+    ]
+
+    generation_end = [item for item in payloads if item.get("type") == "generation_end"]
+    diversity_snapshot = [item for item in payloads if item.get("type") == "diversity_snapshot"]
+    assert generation_end
+    assert diversity_snapshot
+
+
+def test_run_experiment_population_mode_completes_task_when_thresholds_are_easy(
+    tmp_path: Path,
+) -> None:
+    config = RunConfig(
+        seed=2,
+        sandbox_backend="process",
+        bootstrap_backend="static",
+        evolution_mode="population",
+        population_size=4,
+        elite_count=1,
+        tournament_k=2,
+        max_generations=2,
+        pass_ratio_threshold=0.0,
+        fitness_threshold=0.0,
+    )
+
+    summary = run_experiment(task_name="two_sum_sorted", config=config, output_root=tmp_path)
+
+    assert "two_sum_sorted" in summary.completed_tasks
+
+
+def test_run_experiment_fails_fast_when_docker_unavailable(monkeypatch, tmp_path: Path) -> None:
+    from alife_core import runtime
+
+    config = RunConfig(
+        sandbox_backend="docker",
+        bootstrap_backend="static",
+    )
+
+    class Failed:
+        returncode = 1
+        stdout = ""
+        stderr = "daemon unavailable"
+
+    monkeypatch.setattr(runtime.subprocess, "run", lambda *args, **kwargs: Failed())
+
+    try:
+        run_experiment(task_name="two_sum_sorted", config=config, output_root=tmp_path)
+    except RuntimeError as exc:
+        assert "docker daemon" in str(exc).lower()
+    else:
+        raise AssertionError("expected RuntimeError when docker daemon is unavailable")
+
+
+def test_ast_shape_fingerprint_ignores_names_and_constants() -> None:
+    from alife_core import runtime
+
+    left = "def solve(x):\n    value = x + 1\n    return value\n"
+    right = "def solve(y):\n    other = y + 2\n    return other\n"
+
+    assert runtime._ast_shape_fingerprint(left) == runtime._ast_shape_fingerprint(right)
+
+
+def test_crossover_code_returns_parseable_candidate_for_structured_parents() -> None:
+    import ast
+    import random
+
+    from alife_core import runtime
+
+    parent_a = (
+        "def solve(x):\n"
+        "    if x > 0:\n"
+        "        y = x + 1\n"
+        "    else:\n"
+        "        y = x - 1\n"
+        "    return y\n"
+    )
+    parent_b = "def solve(x):\n    if x % 2 == 0:\n        return x // 2\n    return x * 3\n"
+
+    candidate = runtime._crossover_code(parent_a, parent_b, random.Random(1))
+    ast.parse(candidate)
+
+
+def test_evaluate_population_uses_parallel_workers(monkeypatch) -> None:
+    import threading
+    import time
+
+    from alife_core import runtime
+    from alife_core.models import EvaluationResult
+    from alife_core.tasks.builtin import load_builtin_tasks
+
+    lock = threading.Lock()
+    active = 0
+    max_active = 0
+
+    def fake_evaluate(code, task, edit_cost, config):
+        nonlocal active, max_active
+        _ = code
+        _ = task
+        _ = edit_cost
+        _ = config
+        with lock:
+            active += 1
+            max_active = max(max_active, active)
+        time.sleep(0.05)
+        with lock:
+            active -= 1
+        return EvaluationResult(
+            train_pass_ratio=0.0,
+            hidden_pass_ratio=0.0,
+            ast_edit_cost=0.0,
+            fitness=0.0,
+            train_failures=1,
+            hidden_failures=1,
+        )
+
+    monkeypatch.setattr(runtime, "evaluate_candidate", fake_evaluate)
+    task = load_builtin_tasks()["two_sum_sorted"]
+    config = RunConfig(sandbox_backend="process", population_workers=4)
+    runtime._evaluate_population(
+        ["def two_sum_sorted(numbers, target):\n    return (1, 2)\n"] * 4,
+        task,
+        config,
+    )
+
+    assert max_active > 1
+
+
+def test_population_mode_logs_step_and_energy_keys(tmp_path: Path) -> None:
+    config = RunConfig(
+        seed=4,
+        sandbox_backend="process",
+        bootstrap_backend="static",
+        evolution_mode="population",
+        population_size=4,
+        elite_count=1,
+        max_generations=2,
+    )
+    summary = run_experiment(task_name="two_sum_sorted", config=config, output_root=tmp_path)
+    payloads = [
+        json.loads(line) for line in summary.log_path.read_text(encoding="utf-8").splitlines()
+    ]
+    generation_end = next(item for item in payloads if item.get("type") == "generation_end")
+
+    assert "step" in generation_end
+    assert "energy" in generation_end
+    assert generation_end["mode"] == "population"
+    assert "timestamp" in generation_end
+
+
+def test_population_mode_checks_final_generation_candidate(monkeypatch, tmp_path: Path) -> None:
+    from alife_core import runtime
+    from alife_core.models import OrganismState
+    from alife_core.tasks.builtin import load_builtin_tasks
+
+    task = load_builtin_tasks()["two_sum_sorted"]
+    init_codes = [static_seed_payload()] * 4
+    calls = {"count": 0}
+
+    monkeypatch.setattr(
+        runtime,
+        "_ensure_docker_daemon_available",
+        lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        runtime,
+        "_initialize_population_for_task",
+        lambda *_args, **_kwargs: init_codes,
+    )
+
+    def fake_evaluate_population(codes, task_obj, config):
+        _ = codes
+        _ = task_obj
+        _ = config
+        calls["count"] += 1
+        if calls["count"] == 1:
+            return [
+                OrganismState(
+                    code=static_seed_payload(),
+                    fitness=0.0,
+                    train_pass_ratio=0.0,
+                    hidden_pass_ratio=0.0,
+                )
+            ] * 4
+        return [
+            OrganismState(
+                code=static_seed_payload(),
+                fitness=1.0,
+                train_pass_ratio=1.0,
+                hidden_pass_ratio=1.0,
+            )
+        ] * 4
+
+    monkeypatch.setattr(runtime, "_evaluate_population", fake_evaluate_population)
+    monkeypatch.setattr(runtime, "load_builtin_tasks", lambda: {"two_sum_sorted": task})
+    monkeypatch.setattr(
+        runtime,
+        "_mutate_code",
+        lambda code, rng, intensity=1, prefer_structural=False: code,
+    )
+
+    config = RunConfig(
+        seed=0,
+        sandbox_backend="process",
+        bootstrap_backend="static",
+        evolution_mode="population",
+        population_size=4,
+        elite_count=1,
+        tournament_k=2,
+        max_generations=1,
+        pass_ratio_threshold=0.9,
+        fitness_threshold=0.9,
+    )
+
+    summary = run_experiment(task_name="two_sum_sorted", config=config, output_root=tmp_path)
+    assert "two_sum_sorted" in summary.completed_tasks
+
+
+def test_load_run_config_rejects_invalid_population_rates(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        "\n".join(
+            [
+                "crossover_rate: 1.1",
+                "mutation_rate: -0.1",
+                "population_workers: 0",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    try:
+        load_run_config(config_path)
+    except ValueError as exc:
+        assert "crossover_rate" in str(exc) or "mutation_rate" in str(exc) or "workers" in str(exc)
+    else:
+        raise AssertionError("expected ValueError for invalid population config")
+
+
+def test_run_experiment_rejects_invalid_population_workers(tmp_path: Path) -> None:
+    config = RunConfig(
+        sandbox_backend="process",
+        bootstrap_backend="static",
+        population_workers=0,
+    )
+    try:
+        run_experiment(task_name="two_sum_sorted", config=config, output_root=tmp_path)
+    except ValueError as exc:
+        assert "population_workers" in str(exc)
+    else:
+        raise AssertionError("expected ValueError for invalid population_workers")

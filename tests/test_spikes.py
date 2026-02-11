@@ -23,6 +23,19 @@ def test_docker_latency_handles_zero_iterations() -> None:
     assert result["recommended_strategy"] == "unknown"
 
 
+def test_docker_latency_reports_unavailable_daemon(monkeypatch) -> None:
+    module = _load_script("scripts/docker_latency_spike.py")
+
+    class Failed:
+        returncode = 1
+
+    monkeypatch.setattr(module.subprocess, "run", lambda *args, **kwargs: Failed())
+    result = module.benchmark(iterations=1)
+
+    assert result["recommended_strategy"] == "docker_unavailable"
+    assert result["docker_available"] is False
+
+
 def test_ast_feasibility_handles_zero_samples() -> None:
     module = _load_script("scripts/ast_feasibility_spike.py")
 
@@ -63,6 +76,9 @@ def test_schedule_curve_handles_negative_steps() -> None:
 
 def test_parameter_sweep_returns_rows(tmp_path: Path) -> None:
     module = _load_script("scripts/parameter_sweep.py")
+    module.run_experiment = lambda task_name, config, output_root: type(
+        "Summary", (), {"completed_tasks": [task_name]}
+    )()
 
     rows = module.run_parameter_sweep(
         output_root=tmp_path,
@@ -154,6 +170,9 @@ def test_parameter_sweep_respects_task_name_argument(tmp_path: Path) -> None:
 def test_parameter_sweep_writes_output_within_output_root(tmp_path: Path) -> None:
     module = _load_script("scripts/parameter_sweep.py")
     output_path = "artifacts/sweep.json"
+    module.run_experiment = lambda task_name, config, output_root: type(
+        "Summary", (), {"completed_tasks": [task_name]}
+    )()
 
     module.run_parameter_sweep(
         output_root=tmp_path,
@@ -181,3 +200,24 @@ def test_parameter_sweep_rejects_output_path_outside_output_root(tmp_path: Path)
         assert "output_root" in str(exc)
     else:
         raise AssertionError("expected ValueError for output_path outside output_root")
+
+
+def test_parameter_sweep_fails_fast_when_docker_unavailable(tmp_path: Path) -> None:
+    module = _load_script("scripts/parameter_sweep.py")
+
+    def fail_run_experiment(*args, **kwargs):
+        raise RuntimeError("Docker daemon unavailable for docker sandbox backend")
+
+    module.run_experiment = fail_run_experiment
+
+    try:
+        module.run_parameter_sweep(
+            output_root=tmp_path,
+            seeds=[0],
+            grid=[{"n_stagnation": 1, "mutation_stagnation_window": 1}],
+            max_steps=1,
+        )
+    except RuntimeError as exc:
+        assert "sweep aborted" in str(exc).lower()
+    else:
+        raise AssertionError("expected RuntimeError when docker daemon is unavailable")

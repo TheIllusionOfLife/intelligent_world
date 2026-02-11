@@ -56,6 +56,14 @@ def build_parser() -> argparse.ArgumentParser:
     run_parser.add_argument("--bootstrap-backend", choices=["static", "ollama"], default=None)
     run_parser.add_argument("--ollama-model", default=None)
     run_parser.add_argument("--unsafe-process-backend", action="store_true")
+    run_parser.add_argument("--population", action="store_true")
+    run_parser.add_argument("--population-size", type=int, default=None)
+    run_parser.add_argument("--elite-count", type=int, default=None)
+    run_parser.add_argument("--tournament-k", type=int, default=None)
+    run_parser.add_argument("--crossover-rate", type=float, default=None)
+    run_parser.add_argument("--mutation-rate", type=float, default=None)
+    run_parser.add_argument("--max-generations", type=int, default=None)
+    run_parser.add_argument("--population-workers", type=int, default=None)
     curriculum_group = run_parser.add_mutually_exclusive_group()
     curriculum_group.add_argument("--curriculum", dest="curriculum", action="store_true")
     curriculum_group.add_argument("--no-curriculum", dest="curriculum", action="store_false")
@@ -82,6 +90,14 @@ def _dispatch(args: argparse.Namespace) -> int:
             ollama_model_override=args.ollama_model,
             run_curriculum_override=args.curriculum,
             allow_unsafe_process_backend_override=args.unsafe_process_backend,
+            evolution_mode_override="population" if args.population else None,
+            population_size_override=args.population_size,
+            elite_count_override=args.elite_count,
+            tournament_k_override=args.tournament_k,
+            crossover_rate_override=args.crossover_rate,
+            mutation_rate_override=args.mutation_rate,
+            max_generations_override=args.max_generations,
+            population_workers_override=args.population_workers,
         )
         summary = run_experiment(task_name=args.task, config=config, output_root=Path("."))
         print(
