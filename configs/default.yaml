@@ -7,3 +7,18 @@ fitness_threshold: 0.7
 exec_timeout_seconds: 1.0
 sandbox_backend: docker
 docker_image: python:3.12-slim
+
+initial_energy: 1.0
+max_steps: 200
+n_stagnation: 100
+improvement_multiplier: 1.0
+degradation_multiplier: 1.0
+
+initial_temperature: 1.0
+cooling_rate: 0.995
+
+w2_floor: 0.02
+decay_factor: 0.999
+
+mutation_stagnation_window: 20
+goodhart_gap_threshold: 0.2

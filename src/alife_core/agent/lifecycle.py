@@ -13,6 +13,7 @@ class AgentState:
 def apply_step_outcome(
     state: AgentState,
     accepted: bool,
+    previous_fitness: float,
     evaluation: EvaluationResult | None,
     mutation_rejected: bool,
     config: RunConfig,
@@ -25,7 +26,12 @@ def apply_step_outcome(
     next_best = state.best_fitness
 
     if accepted and evaluation is not None:
-        next_energy += evaluation.fitness
+        delta = evaluation.fitness - previous_fitness
+        if delta >= 0:
+            next_energy += config.improvement_multiplier * delta
+        else:
+            next_energy -= config.degradation_multiplier * abs(delta)
+
         if evaluation.fitness > state.best_fitness:
             next_best = evaluation.fitness
             next_stagnation = 0

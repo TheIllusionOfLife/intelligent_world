@@ -17,6 +17,21 @@ class RunConfig:
     sandbox_backend: SandboxBackend = "docker"
     docker_image: str = "python:3.12-slim"
 
+    initial_energy: float = 1.0
+    max_steps: int = 200
+    n_stagnation: int = 100
+    improvement_multiplier: float = 1.0
+    degradation_multiplier: float = 1.0
+
+    initial_temperature: float = 1.0
+    cooling_rate: float = 0.995
+
+    w2_floor: float = 0.02
+    decay_factor: float = 0.999
+
+    mutation_stagnation_window: int = 20
+    goodhart_gap_threshold: float = 0.2
+
 
 @dataclass(frozen=True)
 class TaskSpec:
