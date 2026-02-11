@@ -78,6 +78,28 @@ def test_extract_python_code_joins_multiple_python_blocks() -> None:
     assert "def b" in code
 
 
+def test_extract_python_code_uses_only_fenced_segments_for_generic_blocks() -> None:
+    from alife_core.bootstrap import _extract_python_code
+
+    text = (
+        "before\n"
+        "```\n"
+        "def a():\n    return 1\n"
+        "```\n"
+        "this prose should not appear in output\n"
+        "```\n"
+        "def b():\n    return 2\n"
+        "```\n"
+        "after\n"
+    )
+
+    code = _extract_python_code(text)
+
+    assert "def a" in code
+    assert "def b" in code
+    assert "this prose should not appear in output" not in code
+
+
 def test_generate_ollama_seed_requires_function_name(monkeypatch) -> None:
     from alife_core import bootstrap
 
@@ -100,6 +122,26 @@ def test_generate_ollama_seed_requires_function_name(monkeypatch) -> None:
         assert "function name" in str(exc)
     else:
         raise AssertionError("expected BootstrapError for missing function name")
+
+
+def test_generate_ollama_seed_accepts_nested_function_definition(monkeypatch) -> None:
+    from alife_core import bootstrap
+
+    task = load_builtin_tasks()["two_sum_sorted"]
+    config = RunConfig(
+        bootstrap_backend="ollama",
+        ollama_model="gpt-oss:20b",
+    )
+
+    class Completed:
+        returncode = 0
+        stdout = "if True:\n    def two_sum_sorted(numbers, target):\n        return (1, 2)\n"
+        stderr = ""
+
+    monkeypatch.setattr(bootstrap.subprocess, "run", lambda *args, **kwargs: Completed())
+
+    code = bootstrap._generate_ollama_seed(task, config)
+    assert "def two_sum_sorted" in code
 
 
 def test_generate_ollama_seed_invokes_expected_command(monkeypatch) -> None:

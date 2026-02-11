@@ -82,7 +82,13 @@ def compute_ast_edit_cost(previous_code: str, candidate_code: str) -> float:
 
 def _mutate_statement_swap(tree: ast.AST, rng: random.Random) -> bool:
     for node in ast.walk(tree):
-        if isinstance(node, ast.FunctionDef) and len(node.body) >= 2 and rng.random() < 0.2:
+        if (
+            hasattr(node, "body")
+            and isinstance(node.body, list)
+            and len(node.body) >= 2
+            and all(isinstance(item, ast.stmt) for item in node.body)
+            and rng.random() < 0.2
+        ):
             left = rng.choice(range(0, len(node.body) - 1))
             node.body[left], node.body[left + 1] = node.body[left + 1], node.body[left]
             return True
@@ -133,7 +139,11 @@ def _mutate_boolop(tree: ast.AST, rng: random.Random) -> bool:
 
 def _mutate_constant(tree: ast.AST, rng: random.Random) -> bool:
     for node in ast.walk(tree):
-        if isinstance(node, ast.Constant) and isinstance(node.value, int) and rng.random() < 0.6:
+        if (
+            isinstance(node, ast.Constant)
+            and isinstance(node.value, (int, float))
+            and rng.random() < 0.6
+        ):
             node.value = node.value + rng.choice([-2, -1, 1, 2])
             return True
     return False
@@ -313,7 +323,7 @@ def run_experiment(task_name: str, config: RunConfig, output_root: Path) -> RunS
                 "w2_effective": _effective_w2(config, 0),
                 "bootstrap_backend": bootstrap_backend_used,
                 "bootstrap_model": config.ollama_model
-                if config.bootstrap_backend == "ollama"
+                if bootstrap_backend_used == "ollama"
                 else "",
                 "bootstrap_fallback_used": bootstrap_fallback_used,
                 "bootstrap_error": bootstrap_error,

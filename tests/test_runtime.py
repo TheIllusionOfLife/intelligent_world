@@ -129,6 +129,7 @@ def test_run_experiment_falls_back_to_static_seed_when_bootstrap_fails(
     assert payloads[0]["parameters"]["bootstrap_backend"] == "ollama"
     assert payloads[1]["type"] == "step"
     assert payloads[1]["bootstrap_fallback_used"] is True
+    assert payloads[1]["bootstrap_model"] == ""
 
 
 def test_run_experiment_does_not_swallow_unexpected_bootstrap_errors(
@@ -254,3 +255,45 @@ def test_mutate_code_can_adjust_comparison_operator() -> None:
     mutated = runtime._mutate_code(source, FakeRng(), intensity=1)
 
     assert "if x < y" not in mutated
+
+
+def test_mutate_statement_swap_can_operate_on_nested_body() -> None:
+    import ast
+
+    from alife_core import runtime
+
+    class FakeRng:
+        def random(self) -> float:
+            return 0.0
+
+        def choice(self, seq):  # noqa: ANN001
+            return seq[0]
+
+    tree = ast.parse("def solve(x):\n    if x > 0:\n        y = 1\n        z = 2\n")
+
+    changed = runtime._mutate_statement_swap(tree, FakeRng())
+    rendered = ast.unparse(tree)
+
+    assert changed is True
+    assert "z = 2" in rendered and "y = 1" in rendered
+    assert rendered.index("z = 2") < rendered.index("y = 1")
+
+
+def test_mutate_constant_supports_float_literals() -> None:
+    import ast
+
+    from alife_core import runtime
+
+    class FakeRng:
+        def random(self) -> float:
+            return 0.0
+
+        def choice(self, seq):  # noqa: ANN001
+            return seq[0]
+
+    tree = ast.parse("def solve(x):\n    return x < 0.5\n")
+    changed = runtime._mutate_constant(tree, FakeRng())
+    rendered = ast.unparse(tree)
+
+    assert changed is True
+    assert "0.5" not in rendered

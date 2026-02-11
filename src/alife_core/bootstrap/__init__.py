@@ -63,9 +63,8 @@ def _extract_python_code(text: str) -> str:
             blocks.append(part.split("```", maxsplit=1)[0].strip())
         return "\n\n".join(block for block in blocks if block).strip() + "\n"
     if "```" in text:
-        blocks = []
-        for part in text.split("```")[1:]:
-            blocks.append(part.split("```", maxsplit=1)[0].strip())
+        parts = text.split("```")
+        blocks = [part.strip() for part in parts[1::2] if part.strip()]
         return "\n\n".join(block for block in blocks if block).strip() + "\n"
     return text.strip() + "\n"
 
@@ -108,7 +107,7 @@ def _generate_ollama_seed(task: TaskSpec, config: RunConfig) -> str:
     except SyntaxError as exc:
         raise BootstrapError(f"Ollama returned invalid python: {exc}") from exc
 
-    function_names = {node.name for node in tree.body if isinstance(node, ast.FunctionDef)}
+    function_names = {node.name for node in ast.walk(tree) if isinstance(node, ast.FunctionDef)}
     if task.function_name not in function_names:
         raise BootstrapError(f"Ollama output missing required function name: {task.function_name}")
 
