@@ -23,6 +23,12 @@ from alife_core.agent.lifecycle import AgentState, apply_step_outcome
 from alife_core.bootstrap import BootstrapError, generate_seed, static_seed
 from alife_core.evaluator.core import evaluate_candidate
 from alife_core.logging.events import write_event, write_run_start
+from alife_core.metrics.evolution import (
+    ast_max_depth,
+    ast_node_count,
+    ast_shape_fingerprint,
+    compute_generation_metrics,
+)
 from alife_core.models import BootstrapBackend, EvolutionMode, OrganismState, RunConfig
 from alife_core.mutation.validation import validate_candidate
 from alife_core.tasks.builtin import load_builtin_tasks
@@ -103,6 +109,14 @@ def _validate_run_config(config: RunConfig) -> None:
         raise ValueError("tournament_k must be >= 1")
     if config.max_generations < 0:
         raise ValueError("max_generations must be >= 0")
+    if config.novelty_k < 1:
+        raise ValueError("novelty_k must be >= 1")
+    if config.convergence_patience < 1:
+        raise ValueError("convergence_patience must be >= 1")
+    if not 0.0 <= config.convergence_entropy_floor <= 1.0:
+        raise ValueError("convergence_entropy_floor must be within [0.0, 1.0]")
+    if config.convergence_fitness_delta_floor < 0.0:
+        raise ValueError("convergence_fitness_delta_floor must be >= 0.0")
     if config.evolution_mode == "population":
         if config.population_size < 2:
             raise ValueError("population_size must be at least 2 for population mode")
@@ -118,16 +132,60 @@ def _effective_w2(config: RunConfig, step: int) -> float:
     return max(config.w2_floor, config.w2_ast_edit_cost * (config.decay_factor**step))
 
 
-def _ast_node_count(source: str) -> int:
-    return sum(1 for _ in ast.walk(ast.parse(source)))
-
-
 def compute_ast_edit_cost(previous_code: str, candidate_code: str) -> float:
     if previous_code == candidate_code:
         return 0.0
-    previous_count = _ast_node_count(previous_code)
-    candidate_count = _ast_node_count(candidate_code)
+    previous_count = ast_node_count(previous_code)
+    candidate_count = ast_node_count(candidate_code)
     return float(abs(candidate_count - previous_count) + 1)
+
+
+def _emit_event(
+    *,
+    log_path: Path,
+    config: RunConfig,
+    run_id: str,
+    event_type: str,
+    mode: str,
+    task: str | None,
+    step: int,
+    payload: dict[str, object],
+) -> None:
+    write_event(
+        log_path,
+        {
+            "schema_version": config.event_schema_version,
+            "event_type": event_type,
+            "timestamp": datetime.now(UTC).isoformat(),
+            "run_id": run_id,
+            "mode": mode,
+            "task": task,
+            "step": step,
+            "payload": payload,
+        },
+    )
+
+
+def _initialize_run(
+    *,
+    config: RunConfig,
+    output_root: Path,
+) -> tuple[str, Path]:
+    run_id = datetime.now(UTC).strftime("run-%Y%m%dT%H%M%S%fZ") + f"-{uuid4().hex[:6]}"
+    log_path = output_root / "logs" / f"{run_id}.jsonl"
+    parameters = asdict(config)
+    config_hash = hashlib.sha256(str(sorted(parameters.items())).encode("utf-8")).hexdigest()
+    write_run_start(
+        log_path=log_path,
+        run_id=run_id,
+        config=config,
+        framework_git_sha=_resolve_git_sha(),
+        docker_image_digest=_resolve_docker_digest(config),
+        python_version=sys.version.split()[0],
+        cpu_architecture=platform.machine(),
+        parameters={**parameters, "config_hash": config_hash},
+    )
+    return run_id, log_path
 
 
 def _mutate_statement_swap(tree: ast.AST, rng: random.Random) -> bool:
@@ -297,23 +355,8 @@ def run_single_agent_experiment(task_name: str, config: RunConfig, output_root: 
         raise ValueError(f"Unknown task: {task_name}")
     task_names = list(tasks)
 
-    run_id = datetime.now(UTC).strftime("run-%Y%m%dT%H%M%S%fZ") + f"-{uuid4().hex[:6]}"
-    logs_dir = output_root / "logs"
+    run_id, log_path = _initialize_run(config=config, output_root=output_root)
     organisms_dir = output_root / "organisms"
-    log_path = logs_dir / f"{run_id}.jsonl"
-
-    parameters = asdict(config)
-    config_hash = hashlib.sha256(str(sorted(parameters.items())).encode("utf-8")).hexdigest()
-    write_run_start(
-        log_path=log_path,
-        run_id=run_id,
-        config=config,
-        framework_git_sha=_resolve_git_sha(),
-        docker_image_digest=_resolve_docker_digest(config),
-        python_version=sys.version.split()[0],
-        cpu_architecture=platform.machine(),
-        parameters={**parameters, "config_hash": config_hash},
-    )
 
     rng = random.Random(config.seed)
     completed_tasks: list[str] = []
@@ -379,12 +422,15 @@ def run_single_agent_experiment(task_name: str, config: RunConfig, output_root: 
         current_path.parent.mkdir(parents=True, exist_ok=True)
         current_path.write_text(current_code, encoding="utf-8")
 
-        write_event(
-            log_path,
-            {
-                "type": "step",
-                "task": task.name,
-                "step": 0,
+        _emit_event(
+            log_path=log_path,
+            config=config,
+            run_id=run_id,
+            event_type="step.evaluated",
+            mode="single_agent",
+            task=task.name,
+            step=0,
+            payload={
                 "accepted": True,
                 "mutation_rejected": False,
                 "energy": state.energy,
@@ -447,12 +493,15 @@ def run_single_agent_experiment(task_name: str, config: RunConfig, output_root: 
                     len(mutation_outcomes) >= config.viability_window
                     and rolling_improvement_rate < config.viability_min_improvement_rate
                 )
-                write_event(
-                    log_path,
-                    {
-                        "type": "step",
-                        "task": task.name,
-                        "step": step,
+                _emit_event(
+                    log_path=log_path,
+                    config=config,
+                    run_id=run_id,
+                    event_type="mutation.rejected",
+                    mode="single_agent",
+                    task=task.name,
+                    step=step,
+                    payload={
                         "accepted": False,
                         "mutation_rejected": True,
                         "rejection_stage": validation.stage,
@@ -525,12 +574,15 @@ def run_single_agent_experiment(task_name: str, config: RunConfig, output_root: 
                 current_path.parent.mkdir(parents=True, exist_ok=True)
                 current_path.write_text(current_code, encoding="utf-8")
 
-            write_event(
-                log_path,
-                {
-                    "type": "step",
-                    "task": task.name,
-                    "step": step,
+            _emit_event(
+                log_path=log_path,
+                config=config,
+                run_id=run_id,
+                event_type="step.evaluated",
+                mode="single_agent",
+                task=task.name,
+                step=step,
+                payload={
                     "accepted": accepted,
                     "mutation_rejected": False,
                     "energy": state.energy,
@@ -565,34 +617,17 @@ def run_single_agent_experiment(task_name: str, config: RunConfig, output_root: 
             break
         current_task_index += 1
 
+    _emit_event(
+        log_path=log_path,
+        config=config,
+        run_id=run_id,
+        event_type="run.completed",
+        mode="single_agent",
+        task=task_name,
+        step=0,
+        payload={"completed_tasks": completed_tasks},
+    )
     return RunSummary(run_id=run_id, log_path=log_path, completed_tasks=completed_tasks)
-
-
-def _ast_shape_fingerprint(source: str) -> str:
-    tree = ast.parse(source)
-
-    class _ShapeNormalizer(ast.NodeTransformer):
-        def visit_Constant(self, node: ast.Constant) -> ast.AST:
-            return ast.copy_location(ast.Constant(value=None), node)
-
-        def visit_Name(self, node: ast.Name) -> ast.AST:
-            updated = ast.Name(id="_", ctx=node.ctx)
-            return ast.copy_location(updated, node)
-
-        def visit_arg(self, node: ast.arg) -> ast.AST:
-            updated = ast.arg(arg="_", annotation=None, type_comment=None)
-            return ast.copy_location(updated, node)
-
-    normalized = _ShapeNormalizer().visit(tree)
-    ast.fix_missing_locations(normalized)
-    return ast.dump(normalized, include_attributes=False)
-
-
-def _diversity_score(population: list[OrganismState]) -> float:
-    if not population:
-        return 0.0
-    unique_shapes = len({_ast_shape_fingerprint(item.code) for item in population})
-    return unique_shapes / len(population)
 
 
 def _tournament_select(
@@ -605,6 +640,10 @@ def _tournament_select(
     k = min(len(population), max(1, tournament_k))
     candidates = rng.sample(population, k)
     return max(candidates, key=lambda item: item.fitness)
+
+
+def _ast_shape_fingerprint(source: str) -> str:
+    return ast_shape_fingerprint(source)
 
 
 def _crossover_code(parent_a: str, parent_b: str, rng: random.Random) -> str:
@@ -640,28 +679,76 @@ def _crossover_code(parent_a: str, parent_b: str, rng: random.Random) -> str:
 
 
 def _evaluate_population(
-    codes: list[str],
+    organisms: list[OrganismState] | list[str],
     task,
     config: RunConfig,
 ) -> list[OrganismState]:
-    def _evaluate_one(code: str) -> OrganismState:
-        result = evaluate_candidate(code, task=task, edit_cost=0.0, config=config)
+    normalized: list[OrganismState] = []
+    if organisms and isinstance(organisms[0], str):
+        for idx, code in enumerate(organisms, start=1):
+            normalized.append(
+                OrganismState(
+                    organism_id=f"legacy-{idx}",
+                    parent_ids=(),
+                    birth_generation=0,
+                    code=code,
+                    fitness=0.0,
+                    train_pass_ratio=0.0,
+                    hidden_pass_ratio=0.0,
+                    lineage_depth=0,
+                    evaluated=False,
+                )
+            )
+    else:
+        normalized = list(organisms)  # type: ignore[arg-type]
+
+    def _evaluate_one(organism: OrganismState) -> OrganismState:
+        result = evaluate_candidate(organism.code, task=task, edit_cost=0.0, config=config)
         return OrganismState(
-            code=code,
+            code=organism.code,
             fitness=result.fitness,
             train_pass_ratio=result.train_pass_ratio,
             hidden_pass_ratio=result.hidden_pass_ratio,
+            organism_id=organism.organism_id,
+            parent_ids=organism.parent_ids,
+            birth_generation=organism.birth_generation,
+            ast_nodes=ast_node_count(organism.code),
+            ast_depth=ast_max_depth(organism.code),
+            shape_fingerprint=ast_shape_fingerprint(organism.code),
+            lineage_depth=organism.lineage_depth,
+            evaluated=True,
         )
 
-    workers = min(max(1, config.population_workers), max(1, len(codes)), (os.cpu_count() or 1))
+    result_population = list(normalized)
+    pending: list[tuple[int, OrganismState]] = [
+        (idx, organism) for idx, organism in enumerate(normalized) if not organism.evaluated
+    ]
+    if not pending:
+        return result_population
+
+    workers = min(
+        max(1, config.population_workers),
+        max(1, len(pending)),
+        (os.cpu_count() or 1),
+    )
     LOGGER.info("Evaluating population with %s workers", workers)
     if workers == 1:
-        return [_evaluate_one(code) for code in codes]
-    with ThreadPoolExecutor(max_workers=workers) as executor:
-        return list(executor.map(_evaluate_one, codes))
+        evaluated_items = [_evaluate_one(organism) for _, organism in pending]
+    else:
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            evaluated_items = list(executor.map(_evaluate_one, [item for _, item in pending]))
+
+    for (idx, _), evaluated in zip(pending, evaluated_items, strict=True):
+        result_population[idx] = evaluated
+    return result_population
 
 
-def _initialize_population_for_task(task, config: RunConfig, rng: random.Random) -> list[str]:
+def _initialize_population_for_task(
+    task,
+    config: RunConfig,
+    rng: random.Random,
+    id_counter: list[int],
+) -> list[OrganismState]:
     try:
         bootstrap_code = generate_seed(task, config)
     except BootstrapError as exc:
@@ -681,7 +768,23 @@ def _initialize_population_for_task(task, config: RunConfig, rng: random.Random)
         candidate = _mutate_code(bootstrap_code, rng, intensity=1)
         if validate_candidate(candidate).is_valid:
             population_codes.append(candidate)
-    return population_codes
+    organisms: list[OrganismState] = []
+    for code in population_codes:
+        id_counter[0] += 1
+        organisms.append(
+            OrganismState(
+                organism_id=f"org-{id_counter[0]}",
+                parent_ids=(),
+                birth_generation=0,
+                code=code,
+                fitness=0.0,
+                train_pass_ratio=0.0,
+                hidden_pass_ratio=0.0,
+                lineage_depth=0,
+                evaluated=False,
+            )
+        )
+    return organisms
 
 
 def run_population_experiment(task_name: str, config: RunConfig, output_root: Path) -> RunSummary:
@@ -697,91 +800,77 @@ def run_population_experiment(task_name: str, config: RunConfig, output_root: Pa
     tasks = load_builtin_tasks()
     if task_name not in tasks:
         raise ValueError(f"Unknown task: {task_name}")
-    run_id = datetime.now(UTC).strftime("run-%Y%m%dT%H%M%S%fZ") + f"-{uuid4().hex[:6]}"
-    logs_dir = output_root / "logs"
+    run_id, log_path = _initialize_run(config=config, output_root=output_root)
     organisms_dir = output_root / "organisms"
-    log_path = logs_dir / f"{run_id}.jsonl"
-
-    parameters = asdict(config)
-    config_hash = hashlib.sha256(str(sorted(parameters.items())).encode("utf-8")).hexdigest()
-    write_run_start(
-        log_path=log_path,
-        run_id=run_id,
-        config=config,
-        framework_git_sha=_resolve_git_sha(),
-        docker_image_digest=_resolve_docker_digest(config),
-        python_version=sys.version.split()[0],
-        cpu_architecture=platform.machine(),
-        parameters={**parameters, "config_hash": config_hash},
-    )
 
     rng = random.Random(config.seed)
     completed_tasks: list[str] = []
     current_task_names = list(tasks)
     current_task_index = current_task_names.index(task_name)
+    id_counter = [0]
 
     while current_task_index < len(current_task_names):
         task = tasks[current_task_names[current_task_index]]
         recent_diversity: deque[float] = deque(maxlen=max(1, config.diversity_window))
-        population_codes = _initialize_population_for_task(task, config, rng)
-        population = _evaluate_population(population_codes, task, config)
+        recent_best_fitness: deque[float] = deque(maxlen=max(1, config.convergence_patience))
+        seed_population = _initialize_population_for_task(task, config, rng, id_counter)
+        population = _evaluate_population(seed_population, task, config)
 
         unlocked = False
-        # Evaluate at generation 0 (initial population) and after each reproduction step.
-        # This is intentionally max_generations + 1 checkpoints so the final evolved
-        # population is scored and unlock-checked before exiting.
         for generation in range(config.max_generations + 1):
             best = max(population, key=lambda item: item.fitness)
             fitnesses = [item.fitness for item in population]
-            diversity = _diversity_score(population)
-            recent_diversity.append(diversity)
+            metrics = compute_generation_metrics(population, novelty_k=config.novelty_k)
+            recent_diversity.append(metrics.structural_diversity_ratio)
+            recent_best_fitness.append(best.fitness)
 
-            write_event(
-                log_path,
-                {
-                    "type": "generation_start",
-                    "task": task.name,
-                    "generation": generation,
-                    "population_size": len(population),
-                    "step": generation,
-                    "energy": None,
-                    "mode": "population",
-                    "run_id": run_id,
-                    "timestamp": datetime.now(UTC).isoformat(),
-                },
+            _emit_event(
+                log_path=log_path,
+                config=config,
+                run_id=run_id,
+                event_type="generation.started",
+                mode="population",
+                task=task.name,
+                step=generation,
+                payload={"generation": generation, "population_size": len(population)},
             )
-            write_event(
-                log_path,
-                {
-                    "type": "diversity_snapshot",
-                    "task": task.name,
-                    "generation": generation,
-                    "diversity_score": diversity,
-                    "min_diversity_score": config.min_diversity_score,
-                    "step": generation,
-                    "energy": None,
-                    "mode": "population",
-                    "run_id": run_id,
-                    "timestamp": datetime.now(UTC).isoformat(),
-                },
-            )
-            write_event(
-                log_path,
-                {
-                    "type": "generation_end",
-                    "task": task.name,
+            _emit_event(
+                log_path=log_path,
+                config=config,
+                run_id=run_id,
+                event_type="generation.metrics",
+                mode="population",
+                task=task.name,
+                step=generation,
+                payload={
                     "generation": generation,
                     "best_fitness": best.fitness,
                     "mean_fitness": statistics.fmean(fitnesses),
                     "median_fitness": statistics.median(fitnesses),
                     "best_train_pass_ratio": best.train_pass_ratio,
                     "best_hidden_pass_ratio": best.hidden_pass_ratio,
-                    "step": generation,
-                    "energy": None,
-                    "mode": "population",
-                    "run_id": run_id,
-                    "timestamp": datetime.now(UTC).isoformat(),
+                    "structural_diversity_ratio": metrics.structural_diversity_ratio,
+                    "shannon_entropy": metrics.shannon_entropy,
+                    "simpson_diversity_index": metrics.simpson_diversity_index,
+                    "cluster_count": metrics.cluster_count,
+                    "mean_ast_nodes": metrics.mean_ast_nodes,
+                    "median_ast_nodes": metrics.median_ast_nodes,
+                    "mean_ast_depth": metrics.mean_ast_depth,
+                    "median_ast_depth": metrics.median_ast_depth,
+                    "mean_novelty": metrics.mean_novelty,
+                    "max_lineage_depth": metrics.max_lineage_depth,
+                    "mean_lineage_depth": metrics.mean_lineage_depth,
                 },
+            )
+            _emit_event(
+                log_path=log_path,
+                config=config,
+                run_id=run_id,
+                event_type="generation.ended",
+                mode="population",
+                task=task.name,
+                step=generation,
+                payload={"generation": generation},
             )
 
             archive_path = (
@@ -801,22 +890,30 @@ def run_population_experiment(task_name: str, config: RunConfig, output_root: Pa
                 unlocked = True
                 break
 
-            if len(recent_diversity) >= config.diversity_window and all(
+            low_diversity = len(recent_diversity) >= config.diversity_window and all(
                 score <= config.min_diversity_score for score in recent_diversity
-            ):
-                write_event(
-                    log_path,
-                    {
-                        "type": "extinction_or_convergence",
-                        "task": task.name,
+            )
+            fitness_stalled = (
+                len(recent_best_fitness) >= config.convergence_patience
+                and (max(recent_best_fitness) - min(recent_best_fitness))
+                <= config.convergence_fitness_delta_floor
+            )
+            low_entropy = metrics.shannon_entropy <= config.convergence_entropy_floor
+            if low_diversity or (fitness_stalled and low_entropy):
+                _emit_event(
+                    log_path=log_path,
+                    config=config,
+                    run_id=run_id,
+                    event_type="evolution.converged",
+                    mode="population",
+                    task=task.name,
+                    step=generation,
+                    payload={
                         "generation": generation,
-                        "reason": "low_diversity",
+                        "reason": "low_diversity" if low_diversity else "stalled_low_entropy",
                         "diversity_window": list(recent_diversity),
-                        "step": generation,
-                        "energy": None,
-                        "mode": "population",
-                        "run_id": run_id,
-                        "timestamp": datetime.now(UTC).isoformat(),
+                        "best_fitness_window": list(recent_best_fitness),
+                        "shannon_entropy": metrics.shannon_entropy,
                     },
                 )
                 break
@@ -826,25 +923,45 @@ def run_population_experiment(task_name: str, config: RunConfig, output_root: Pa
 
             sorted_population = sorted(population, key=lambda item: item.fitness, reverse=True)
             elites = sorted_population[: config.elite_count]
-            next_codes = [item.code for item in elites]
-            while len(next_codes) < config.population_size:
+            next_organisms: list[OrganismState] = []
+            for elite in elites:
+                id_counter[0] += 1
+                next_organisms.append(
+                    OrganismState(
+                        organism_id=f"org-{id_counter[0]}",
+                        parent_ids=(elite.organism_id,),
+                        birth_generation=generation + 1,
+                        code=elite.code,
+                        fitness=elite.fitness,
+                        train_pass_ratio=elite.train_pass_ratio,
+                        hidden_pass_ratio=elite.hidden_pass_ratio,
+                        ast_nodes=elite.ast_nodes,
+                        ast_depth=elite.ast_depth,
+                        shape_fingerprint=elite.shape_fingerprint,
+                        lineage_depth=elite.lineage_depth + 1,
+                        evaluated=True,
+                    )
+                )
+
+            while len(next_organisms) < config.population_size:
                 parent_a = _tournament_select(population, rng, config.tournament_k)
                 child_code = parent_a.code
+                parent_ids = (parent_a.organism_id,)
+                child_lineage_depth = parent_a.lineage_depth + 1
                 if rng.random() < config.crossover_rate:
                     parent_b = _tournament_select(population, rng, config.tournament_k)
                     child_code = _crossover_code(parent_a.code, parent_b.code, rng)
-                    write_event(
-                        log_path,
-                        {
-                            "type": "crossover",
-                            "task": task.name,
-                            "generation": generation,
-                            "step": generation,
-                            "energy": None,
-                            "mode": "population",
-                            "run_id": run_id,
-                            "timestamp": datetime.now(UTC).isoformat(),
-                        },
+                    parent_ids = (parent_a.organism_id, parent_b.organism_id)
+                    child_lineage_depth = max(parent_a.lineage_depth, parent_b.lineage_depth) + 1
+                    _emit_event(
+                        log_path=log_path,
+                        config=config,
+                        run_id=run_id,
+                        event_type="crossover.applied",
+                        mode="population",
+                        task=task.name,
+                        step=generation,
+                        payload={"generation": generation, "parent_ids": parent_ids},
                     )
                 if rng.random() < config.mutation_rate:
                     child_code = _mutate_code(child_code, rng, intensity=1)
@@ -852,14 +969,39 @@ def run_population_experiment(task_name: str, config: RunConfig, output_root: Pa
                 validation = validate_candidate(child_code)
                 if not validation.is_valid:
                     child_code = parent_a.code
-                next_codes.append(child_code)
+                    parent_ids = (parent_a.organism_id,)
+                    child_lineage_depth = parent_a.lineage_depth + 1
+                id_counter[0] += 1
+                next_organisms.append(
+                    OrganismState(
+                        organism_id=f"org-{id_counter[0]}",
+                        parent_ids=parent_ids,
+                        birth_generation=generation + 1,
+                        code=child_code,
+                        fitness=0.0,
+                        train_pass_ratio=0.0,
+                        hidden_pass_ratio=0.0,
+                        lineage_depth=child_lineage_depth,
+                        evaluated=False,
+                    )
+                )
 
-            population = _evaluate_population(next_codes, task, config)
+            population = _evaluate_population(next_organisms, task, config)
 
         if not unlocked or not config.run_curriculum:
             break
         current_task_index += 1
 
+    _emit_event(
+        log_path=log_path,
+        config=config,
+        run_id=run_id,
+        event_type="run.completed",
+        mode="population",
+        task=task_name,
+        step=0,
+        payload={"completed_tasks": completed_tasks},
+    )
     return RunSummary(run_id=run_id, log_path=log_path, completed_tasks=completed_tasks)
 
 

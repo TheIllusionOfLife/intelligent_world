@@ -45,6 +45,11 @@ def run_parameter_sweep_spike(
     )
 
 
+def run_metrics_report_spike(log_path: str) -> dict[str, object]:
+    module = _load_script_module("scripts/metrics_report.py")
+    return module.summarize_metrics(log_path)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="alife")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -77,6 +82,8 @@ def build_parser() -> argparse.ArgumentParser:
     sweep_parser = spike_subparsers.add_parser("parameter-sweep")
     sweep_parser.add_argument("--sweep-output", default=None)
     sweep_parser.add_argument("--unsafe-process-backend", action="store_true")
+    metrics_parser = spike_subparsers.add_parser("metrics-report")
+    metrics_parser.add_argument("--log-path", required=True)
 
     return parser
 
@@ -134,6 +141,10 @@ def _dispatch(args: argparse.Namespace) -> int:
                 sort_keys=True,
             )
         )
+        return 0
+
+    if args.spike_command == "metrics-report":
+        print(json.dumps(run_metrics_report_spike(log_path=args.log_path), sort_keys=True))
         return 0
 
     return 1

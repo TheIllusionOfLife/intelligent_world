@@ -76,14 +76,14 @@ def test_run_experiment_writes_reproducible_logs_and_artifacts(tmp_path: Path) -
 
     lines = summary.log_path.read_text(encoding="utf-8").splitlines()
     payloads = [json.loads(line) for line in lines]
-    assert payloads[0]["type"] == "run_start"
-    assert payloads[0]["random_seed"] == 7
-    assert "python_version" in payloads[0]
-    assert "cpu_architecture" in payloads[0]
-    assert "framework_git_sha" in payloads[0]
-    assert "parameters" in payloads[0]
+    assert payloads[0]["event_type"] == "run.started"
+    assert payloads[0]["payload"]["random_seed"] == 7
+    assert "python_version" in payloads[0]["payload"]
+    assert "cpu_architecture" in payloads[0]["payload"]
+    assert "framework_git_sha" in payloads[0]["payload"]
+    assert "parameters" in payloads[0]["payload"]
 
-    assert any(item["type"] == "step" for item in payloads)
+    assert any(item["event_type"] == "step.evaluated" for item in payloads)
     assert summary.completed_tasks == ["two_sum_sorted"]
 
 
@@ -129,11 +129,11 @@ def test_run_experiment_falls_back_to_static_seed_when_bootstrap_fails(
     payloads = [
         json.loads(line) for line in summary.log_path.read_text(encoding="utf-8").splitlines()
     ]
-    assert payloads[0]["type"] == "run_start"
-    assert payloads[0]["parameters"]["bootstrap_backend"] == "ollama"
-    assert payloads[1]["type"] == "step"
-    assert payloads[1]["bootstrap_fallback_used"] is True
-    assert payloads[1]["bootstrap_model"] == ""
+    assert payloads[0]["event_type"] == "run.started"
+    assert payloads[0]["payload"]["parameters"]["bootstrap_backend"] == "ollama"
+    assert payloads[1]["event_type"] == "step.evaluated"
+    assert payloads[1]["payload"]["bootstrap_fallback_used"] is True
+    assert payloads[1]["payload"]["bootstrap_model"] == ""
 
 
 def test_run_experiment_does_not_swallow_unexpected_bootstrap_errors(
@@ -241,11 +241,13 @@ def test_curriculum_mode_carries_energy_across_tasks(tmp_path: Path) -> None:
         json.loads(line) for line in summary.log_path.read_text(encoding="utf-8").splitlines()
     ]
     step0_events = [
-        item for item in payloads if item.get("type") == "step" and item.get("step") == 0
+        item
+        for item in payloads
+        if item.get("event_type") == "step.evaluated" and item.get("step") == 0
     ]
 
     assert len(step0_events) >= 2
-    assert step0_events[1]["energy"] < config.initial_energy
+    assert step0_events[1]["payload"]["energy"] < config.initial_energy
 
 
 def test_step_logs_include_mutation_viability_metrics(tmp_path: Path) -> None:
@@ -261,11 +263,11 @@ def test_step_logs_include_mutation_viability_metrics(tmp_path: Path) -> None:
     payloads = [
         json.loads(line) for line in summary.log_path.read_text(encoding="utf-8").splitlines()
     ]
-    step_events = [payload for payload in payloads if payload["type"] == "step"]
+    step_events = [payload for payload in payloads if payload["event_type"] == "step.evaluated"]
 
-    assert "rolling_improvement_rate" in step_events[-1]
-    assert "rolling_validity_rate" in step_events[-1]
-    assert "mutation_fallback_active" in step_events[-1]
+    assert "rolling_improvement_rate" in step_events[-1]["payload"]
+    assert "rolling_validity_rate" in step_events[-1]["payload"]
+    assert "mutation_fallback_active" in step_events[-1]["payload"]
 
 
 def test_mutation_fallback_changes_mutation_mode_when_threshold_breached(tmp_path: Path) -> None:
@@ -285,8 +287,8 @@ def test_mutation_fallback_changes_mutation_mode_when_threshold_breached(tmp_pat
     payloads = [
         json.loads(line) for line in summary.log_path.read_text(encoding="utf-8").splitlines()
     ]
-    step_events = [item for item in payloads if item.get("type") == "step"]
-    assert any(item.get("mutation_fallback_active") for item in step_events[1:])
+    step_events = [item for item in payloads if item.get("event_type") == "step.evaluated"]
+    assert any(item["payload"].get("mutation_fallback_active") for item in step_events[1:])
 
 
 def test_mutate_code_can_adjust_comparison_operator() -> None:
@@ -367,8 +369,10 @@ def test_run_experiment_population_mode_writes_generation_events(tmp_path: Path)
         json.loads(line) for line in summary.log_path.read_text(encoding="utf-8").splitlines()
     ]
 
-    generation_end = [item for item in payloads if item.get("type") == "generation_end"]
-    diversity_snapshot = [item for item in payloads if item.get("type") == "diversity_snapshot"]
+    generation_end = [item for item in payloads if item.get("event_type") == "generation.ended"]
+    diversity_snapshot = [
+        item for item in payloads if item.get("event_type") == "generation.metrics"
+    ]
     assert generation_end
     assert diversity_snapshot
 
@@ -505,10 +509,9 @@ def test_population_mode_logs_step_and_energy_keys(tmp_path: Path) -> None:
     payloads = [
         json.loads(line) for line in summary.log_path.read_text(encoding="utf-8").splitlines()
     ]
-    generation_end = next(item for item in payloads if item.get("type") == "generation_end")
+    generation_end = next(item for item in payloads if item.get("event_type") == "generation.ended")
 
     assert "step" in generation_end
-    assert "energy" in generation_end
     assert generation_end["mode"] == "population"
     assert "timestamp" in generation_end
 
@@ -635,3 +638,90 @@ def test_load_run_config_rejects_invalid_elite_count_for_population_mode(tmp_pat
         assert "elite_count" in str(exc)
     else:
         raise AssertionError("expected ValueError for invalid elite_count")
+
+
+def test_population_mode_emits_schema_v2_generation_metrics(tmp_path: Path) -> None:
+    config = RunConfig(
+        seed=6,
+        sandbox_backend="process",
+        bootstrap_backend="static",
+        evolution_mode="population",
+        population_size=4,
+        elite_count=1,
+        max_generations=2,
+    )
+    summary = run_experiment(task_name="two_sum_sorted", config=config, output_root=tmp_path)
+    payloads = [
+        json.loads(line) for line in summary.log_path.read_text(encoding="utf-8").splitlines()
+    ]
+
+    run_started = payloads[0]
+    assert run_started["schema_version"] == 2
+    assert run_started["event_type"] == "run.started"
+    assert "payload" in run_started
+    generation_metrics = [
+        item for item in payloads if item.get("event_type") == "generation.metrics"
+    ]
+    assert generation_metrics
+    assert "shannon_entropy" in generation_metrics[0]["payload"]
+
+
+def test_evaluate_population_skips_pre_evaluated_organisms(monkeypatch) -> None:
+    from alife_core import runtime
+    from alife_core.models import EvaluationResult, OrganismState
+    from alife_core.tasks.builtin import load_builtin_tasks
+
+    calls = {"count": 0}
+
+    def fake_evaluate(code, task, edit_cost, config):
+        _ = code
+        _ = task
+        _ = edit_cost
+        _ = config
+        calls["count"] += 1
+        return EvaluationResult(
+            train_pass_ratio=1.0,
+            hidden_pass_ratio=1.0,
+            ast_edit_cost=0.0,
+            fitness=1.0,
+            train_failures=0,
+            hidden_failures=0,
+        )
+
+    monkeypatch.setattr(runtime, "evaluate_candidate", fake_evaluate)
+    task = load_builtin_tasks()["two_sum_sorted"]
+    config = RunConfig(sandbox_backend="process", population_workers=1)
+    organisms = [
+        OrganismState(
+            organism_id="elite-1",
+            parent_ids=(),
+            birth_generation=0,
+            code=static_seed_payload(),
+            fitness=0.7,
+            train_pass_ratio=0.8,
+            hidden_pass_ratio=0.8,
+            ast_nodes=10,
+            ast_depth=3,
+            shape_fingerprint="x",
+            lineage_depth=2,
+            evaluated=True,
+        ),
+        OrganismState(
+            organism_id="child-1",
+            parent_ids=("elite-1",),
+            birth_generation=1,
+            code=static_seed_payload(),
+            fitness=0.0,
+            train_pass_ratio=0.0,
+            hidden_pass_ratio=0.0,
+            lineage_depth=3,
+            evaluated=False,
+        ),
+    ]
+
+    evaluated = runtime._evaluate_population(organisms, task, config)
+
+    assert calls["count"] == 1
+    assert evaluated[0].evaluated is True
+    assert evaluated[0].fitness == 0.7
+    assert evaluated[1].evaluated is True

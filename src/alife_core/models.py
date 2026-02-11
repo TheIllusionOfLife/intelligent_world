@@ -54,6 +54,11 @@ class RunConfig:
     population_workers: int = 4
     diversity_window: int = 5
     min_diversity_score: float = 0.2
+    event_schema_version: int = 2
+    novelty_k: int = 3
+    convergence_patience: int = 5
+    convergence_entropy_floor: float = 0.15
+    convergence_fitness_delta_floor: float = 0.005
 
 
 @dataclass(frozen=True)
@@ -88,3 +93,11 @@ class OrganismState:
     fitness: float
     train_pass_ratio: float
     hidden_pass_ratio: float
+    organism_id: str = ""
+    parent_ids: tuple[str, ...] = ()
+    birth_generation: int = 0
+    ast_nodes: int = 0
+    ast_depth: int = 0
+    shape_fingerprint: str = ""
+    lineage_depth: int = 0
+    evaluated: bool = False

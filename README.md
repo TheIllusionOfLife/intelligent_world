@@ -57,7 +57,20 @@ uv run alife spike ast-feasibility
 uv run alife spike schedule-curve
 uv run alife spike parameter-sweep
 uv run alife spike parameter-sweep --sweep-output sweep_summary.json
+uv run alife spike metrics-report --log-path logs/<run-id>.jsonl
 ```
+
+## Event schema
+- Runtime logs use JSONL schema v2 envelopes with:
+  - `schema_version`
+  - `event_type`
+  - `timestamp`
+  - `run_id`
+  - `mode`
+  - `task`
+  - `step`
+  - `payload`
+- Population runs emit `generation.metrics` events with diversity, entropy, novelty, lineage depth, and AST complexity fields.
 
 ## Safety model
 - Default boundary is Docker with restricted runtime settings.

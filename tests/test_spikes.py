@@ -221,3 +221,59 @@ def test_parameter_sweep_fails_fast_when_docker_unavailable(tmp_path: Path) -> N
         assert "sweep aborted" in str(exc).lower()
     else:
         raise AssertionError("expected RuntimeError when docker daemon is unavailable")
+
+
+def test_metrics_report_handles_empty_metrics_log(tmp_path: Path) -> None:
+    module = _load_script("scripts/metrics_report.py")
+    log_path = tmp_path / "run.jsonl"
+    log_path.write_text(
+        '{"schema_version":2,"event_type":"run.started","run_id":"r1","mode":"population","task":null,"step":0,"timestamp":"2026-01-01T00:00:00+00:00","payload":{}}\n',
+        encoding="utf-8",
+    )
+
+    payload = module.summarize_metrics(log_path)
+
+    assert payload["schema_version"] == 2
+    assert payload["generations"] == 0
+    assert payload["last_metrics"] == {}
+
+
+def test_metrics_report_returns_latest_generation_metrics(tmp_path: Path) -> None:
+    module = _load_script("scripts/metrics_report.py")
+    log_path = tmp_path / "run.jsonl"
+    log_path.write_text(
+        "\n".join(
+            [
+                '{"schema_version":2,"event_type":"run.started","run_id":"r1","mode":"population","task":null,"step":0,"timestamp":"2026-01-01T00:00:00+00:00","payload":{}}',
+                '{"schema_version":2,"event_type":"generation.metrics","run_id":"r1","mode":"population","task":"two_sum_sorted","step":0,"timestamp":"2026-01-01T00:00:01+00:00","payload":{"generation":0,"shannon_entropy":0.2}}',
+                '{"schema_version":2,"event_type":"generation.metrics","run_id":"r1","mode":"population","task":"two_sum_sorted","step":1,"timestamp":"2026-01-01T00:00:02+00:00","payload":{"generation":1,"shannon_entropy":0.4}}',
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    payload = module.summarize_metrics(log_path)
+
+    assert payload["generations"] == 2
+    assert payload["last_metrics"]["generation"] == 1
+    assert payload["last_metrics"]["shannon_entropy"] == 0.4
+
+
+def test_metrics_report_does_not_require_read_text(monkeypatch, tmp_path: Path) -> None:
+    module = _load_script("scripts/metrics_report.py")
+    log_path = tmp_path / "run.jsonl"
+    log_path.write_text(
+        '{"schema_version":2,"event_type":"generation.metrics","run_id":"r1","mode":"population","task":"two_sum_sorted","step":0,"timestamp":"2026-01-01T00:00:01+00:00","payload":{"generation":0}}\n',
+        encoding="utf-8",
+    )
+
+    def fail_read_text(*args, **kwargs):  # noqa: ANN002,ANN003
+        _ = args
+        _ = kwargs
+        raise AssertionError("read_text should not be called")
+
+    monkeypatch.setattr(Path, "read_text", fail_read_text)
+
+    payload = module.summarize_metrics(log_path)
+
+    assert payload["generations"] == 1
