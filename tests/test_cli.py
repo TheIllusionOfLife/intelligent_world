@@ -19,6 +19,7 @@ def test_cli_supports_run_and_spike_commands() -> None:
             "static",
             "--ollama-model",
             "gpt-oss:20b",
+            "--unsafe-process-backend",
             "--curriculum",
         ]
     )
@@ -27,6 +28,7 @@ def test_cli_supports_run_and_spike_commands() -> None:
     assert run_args.seed == 7
     assert run_args.bootstrap_backend == "static"
     assert run_args.ollama_model == "gpt-oss:20b"
+    assert run_args.unsafe_process_backend is True
     assert run_args.curriculum is True
 
     run_args_no_curriculum = parser.parse_args(
@@ -57,11 +59,13 @@ def test_cli_supports_run_and_spike_commands() -> None:
 def test_dispatch_run_invokes_runtime(monkeypatch, tmp_path: Path) -> None:
     called = {}
 
-    monkeypatch.setattr(
-        cli,
-        "load_run_config",
-        lambda _path, **kwargs: RunConfig(seed=kwargs.get("seed_override") or 0),
-    )
+    def fake_load_config(_path, **kwargs):
+        called["allow_unsafe_process_backend_override"] = kwargs[
+            "allow_unsafe_process_backend_override"
+        ]
+        return RunConfig(seed=kwargs.get("seed_override") or 0)
+
+    monkeypatch.setattr(cli, "load_run_config", fake_load_config)
 
     def fake_run_experiment(task_name, config, output_root):
         called["task_name"] = task_name
@@ -88,6 +92,7 @@ def test_dispatch_run_invokes_runtime(monkeypatch, tmp_path: Path) -> None:
             "static",
             "--ollama-model",
             "gpt-oss:20b",
+            "--unsafe-process-backend",
         ]
     )
     exit_code = cli._dispatch(args)
@@ -95,6 +100,7 @@ def test_dispatch_run_invokes_runtime(monkeypatch, tmp_path: Path) -> None:
     assert exit_code == 0
     assert called["task_name"] == "two_sum_sorted"
     assert called["seed"] == 9
+    assert called["allow_unsafe_process_backend_override"] is True
 
 
 def test_dispatch_spike_calls_ast_feasibility(monkeypatch) -> None:

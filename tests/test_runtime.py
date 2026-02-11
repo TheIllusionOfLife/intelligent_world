@@ -44,6 +44,7 @@ def test_load_run_config_reads_yaml_and_applies_seed_override(tmp_path: Path) ->
         seed_override=7,
         bootstrap_backend_override="ollama",
         ollama_model_override="gpt-oss:20b",
+        allow_unsafe_process_backend_override=True,
     )
 
     assert loaded.seed == 7
@@ -53,12 +54,14 @@ def test_load_run_config_reads_yaml_and_applies_seed_override(tmp_path: Path) ->
     assert loaded.cooling_rate == 0.99
     assert loaded.bootstrap_backend == "ollama"
     assert loaded.ollama_model == "gpt-oss:20b"
+    assert loaded.allow_unsafe_process_backend is True
 
 
 def test_run_experiment_writes_reproducible_logs_and_artifacts(tmp_path: Path) -> None:
     config = RunConfig(
         seed=7,
         sandbox_backend="process",
+        bootstrap_backend="static",
         max_steps=8,
         n_stagnation=4,
         pass_ratio_threshold=0.9,
@@ -113,6 +116,7 @@ def test_run_experiment_falls_back_to_static_seed_when_bootstrap_fails(
         bootstrap_backend="ollama",
         ollama_model="gpt-oss:20b",
         bootstrap_fallback_to_static=True,
+        allow_unsafe_process_backend=True,
     )
 
     def fail_generate_seed(*_args, **_kwargs) -> str:
@@ -141,6 +145,7 @@ def test_run_experiment_does_not_swallow_unexpected_bootstrap_errors(
         sandbox_backend="process",
         bootstrap_backend="ollama",
         bootstrap_fallback_to_static=True,
+        allow_unsafe_process_backend=True,
     )
 
     def fail_generate_seed(*_args, **_kwargs) -> str:
@@ -154,6 +159,50 @@ def test_run_experiment_does_not_swallow_unexpected_bootstrap_errors(
         assert "unexpected" in str(exc)
     else:
         raise AssertionError("expected ValueError to propagate")
+
+
+def test_run_experiment_rejects_unsafe_ollama_process_without_opt_in(tmp_path: Path) -> None:
+    config = RunConfig(
+        sandbox_backend="process",
+        bootstrap_backend="ollama",
+        allow_unsafe_process_backend=False,
+    )
+
+    try:
+        run_experiment(task_name="two_sum_sorted", config=config, output_root=tmp_path)
+    except ValueError as exc:
+        assert "unsafe" in str(exc)
+    else:
+        raise AssertionError("expected ValueError for unsafe process backend combination")
+
+
+def test_run_experiment_allows_unsafe_ollama_process_with_explicit_opt_in(
+    monkeypatch, tmp_path: Path
+) -> None:
+    from alife_core import runtime
+
+    config = RunConfig(
+        sandbox_backend="process",
+        bootstrap_backend="ollama",
+        allow_unsafe_process_backend=True,
+        max_steps=1,
+        n_stagnation=1,
+    )
+    monkeypatch.setattr(runtime, "generate_seed", lambda *_args, **_kwargs: static_seed_payload())
+
+    summary = run_experiment(task_name="two_sum_sorted", config=config, output_root=tmp_path)
+    assert summary.run_id
+
+
+def static_seed_payload() -> str:
+    return (
+        "def two_sum_sorted(numbers, target):\n"
+        "    for i in range(len(numbers)):\n"
+        "        for j in range(i + 1, len(numbers)):\n"
+        "            if numbers[i] + numbers[j] == target:\n"
+        "                return (i + 1, j + 1)\n"
+        "    return (1, 1)\n"
+    )
 
 
 def test_run_experiment_curriculum_mode_advances_tasks(tmp_path: Path) -> None:

@@ -37,6 +37,7 @@ class RunConfig:
     ollama_model: str = "gpt-oss:20b"
     bootstrap_timeout_seconds: float = 20.0
     bootstrap_fallback_to_static: bool = True
+    allow_unsafe_process_backend: bool = False
 
     run_curriculum: bool = False
     viability_window: int = 20

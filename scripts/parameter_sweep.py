@@ -8,6 +8,19 @@ from alife_core.models import RunConfig, SandboxBackend
 from alife_core.runtime import run_experiment
 
 
+def _resolve_safe_output_path(
+    output_root: Path,
+    output_path: Path | str,
+) -> Path:
+    requested = Path(output_path)
+    candidate = requested if requested.is_absolute() else output_root / requested
+    root_resolved = output_root.resolve()
+    candidate_resolved = candidate.resolve()
+    if root_resolved == candidate_resolved or root_resolved in candidate_resolved.parents:
+        return candidate_resolved
+    raise ValueError(f"output_path must stay under output_root: {output_root}")
+
+
 def run_parameter_sweep(
     task_name: str = "two_sum_sorted",
     output_root: Path | str = Path("."),
@@ -69,7 +82,9 @@ def run_parameter_sweep(
         )
 
     if output_path is not None:
-        Path(output_path).write_text(json.dumps(rows, indent=2, sort_keys=True), encoding="utf-8")
+        safe_output_path = _resolve_safe_output_path(sweep_root, output_path)
+        safe_output_path.parent.mkdir(parents=True, exist_ok=True)
+        safe_output_path.write_text(json.dumps(rows, indent=2, sort_keys=True), encoding="utf-8")
 
     return rows
 

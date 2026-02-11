@@ -39,6 +39,7 @@ def load_run_config(
     bootstrap_backend_override: BootstrapBackend | None = None,
     ollama_model_override: str | None = None,
     run_curriculum_override: bool | None = None,
+    allow_unsafe_process_backend_override: bool | None = None,
 ) -> RunConfig:
     loaded = yaml.safe_load(config_path.read_text(encoding="utf-8"))
     if loaded is None:
@@ -57,6 +58,8 @@ def load_run_config(
         config = replace(config, ollama_model=ollama_model_override)
     if run_curriculum_override is not None:
         config = replace(config, run_curriculum=run_curriculum_override)
+    if allow_unsafe_process_backend_override is not None:
+        config = replace(config, allow_unsafe_process_backend=allow_unsafe_process_backend_override)
     return config
 
 
@@ -215,6 +218,16 @@ def _resolve_git_sha() -> str:
 
 
 def run_experiment(task_name: str, config: RunConfig, output_root: Path) -> RunSummary:
+    if (
+        config.sandbox_backend == "process"
+        and config.bootstrap_backend == "ollama"
+        and not config.allow_unsafe_process_backend
+    ):
+        raise ValueError(
+            "process backend with ollama bootstrap is unsafe; "
+            "set allow_unsafe_process_backend=true to opt in explicitly"
+        )
+
     tasks = load_builtin_tasks()
     if task_name not in tasks:
         raise ValueError(f"Unknown task: {task_name}")

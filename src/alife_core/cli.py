@@ -55,6 +55,7 @@ def build_parser() -> argparse.ArgumentParser:
     run_parser.add_argument("--seed", type=int, default=None)
     run_parser.add_argument("--bootstrap-backend", choices=["static", "ollama"], default=None)
     run_parser.add_argument("--ollama-model", default=None)
+    run_parser.add_argument("--unsafe-process-backend", action="store_true")
     curriculum_group = run_parser.add_mutually_exclusive_group()
     curriculum_group.add_argument("--curriculum", dest="curriculum", action="store_true")
     curriculum_group.add_argument("--no-curriculum", dest="curriculum", action="store_false")
@@ -80,6 +81,7 @@ def _dispatch(args: argparse.Namespace) -> int:
             bootstrap_backend_override=args.bootstrap_backend,
             ollama_model_override=args.ollama_model,
             run_curriculum_override=args.curriculum,
+            allow_unsafe_process_backend_override=args.unsafe_process_backend,
         )
         summary = run_experiment(task_name=args.task, config=config, output_root=Path("."))
         print(

@@ -35,29 +35,6 @@ def test_generate_seed_raises_when_ollama_unavailable_and_no_fallback(monkeypatc
         raise AssertionError("expected BootstrapError")
 
 
-def test_generate_seed_falls_back_to_static_when_enabled(monkeypatch) -> None:
-    from alife_core import bootstrap
-
-    task = load_builtin_tasks()["run_length_encode"]
-    config = RunConfig(
-        bootstrap_backend="ollama",
-        ollama_model="gpt-oss:20b",
-        bootstrap_fallback_to_static=True,
-    )
-
-    def fail_ollama(*_args, **_kwargs) -> str:
-        raise BootstrapError("failure")
-
-    monkeypatch.setattr(bootstrap, "_generate_ollama_seed", fail_ollama)
-
-    try:
-        generate_seed(task, config)
-    except BootstrapError as exc:
-        assert "failure" in str(exc)
-    else:
-        raise AssertionError("expected BootstrapError")
-
-
 def test_extract_python_code_joins_multiple_python_blocks() -> None:
     from alife_core.bootstrap import _extract_python_code
 

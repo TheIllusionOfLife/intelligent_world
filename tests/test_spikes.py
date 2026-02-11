@@ -149,3 +149,35 @@ def test_parameter_sweep_respects_task_name_argument(tmp_path: Path) -> None:
     )
 
     assert called["task_names"] == ["slugify"]
+
+
+def test_parameter_sweep_writes_output_within_output_root(tmp_path: Path) -> None:
+    module = _load_script("scripts/parameter_sweep.py")
+    output_path = "artifacts/sweep.json"
+
+    module.run_parameter_sweep(
+        output_root=tmp_path,
+        output_path=output_path,
+        seeds=[0],
+        grid=[{"n_stagnation": 1, "mutation_stagnation_window": 1}],
+        max_steps=1,
+    )
+
+    assert (tmp_path / output_path).exists()
+
+
+def test_parameter_sweep_rejects_output_path_outside_output_root(tmp_path: Path) -> None:
+    module = _load_script("scripts/parameter_sweep.py")
+
+    try:
+        module.run_parameter_sweep(
+            output_root=tmp_path,
+            output_path="../escape.json",
+            seeds=[0],
+            grid=[{"n_stagnation": 1, "mutation_stagnation_window": 1}],
+            max_steps=1,
+        )
+    except ValueError as exc:
+        assert "output_root" in str(exc)
+    else:
+        raise AssertionError("expected ValueError for output_path outside output_root")
