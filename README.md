@@ -1,31 +1,82 @@
 # intelligent_world
 
-Phase 1 scaffold for a minimal ALife runtime focused on deterministic evaluation, mutation safety gates, and structured observability.
+A minimal Artificial Life (ALife) runtime for evolving Python solutions on small coding tasks under explicit safety constraints.
+
+## What this project does
+- Evaluates candidate code against train/hidden tests.
+- Mutates and selects candidates in either single-agent or population mode.
+- Runs untrusted code in Docker by default (`sandbox_backend: docker`).
+- Logs experiment events as JSONL for reproducibility and analysis.
 
 ## Quickstart
-- Sync dependencies: `uv sync --group dev`
-- Run tests: `uv run --group dev pytest`
-- Lint: `uv run --group dev ruff check .`
-- Format check: `uv run --group dev ruff format --check .`
+### Prerequisites
+- Python 3.12+
+- `uv`
+- Docker daemon (required for default sandbox)
+- Optional: `ollama` CLI when using `bootstrap_backend: ollama`
 
-## CLI
-- `uv run alife run --task two_sum_sorted --seed 7`
-- `uv run alife run --task two_sum_sorted --seed 7 --population --population-size 12 --elite-count 3 --max-generations 30 --population-workers 4`
-- `uv run alife run --task two_sum_sorted --seed 7 --bootstrap-backend ollama --ollama-model gpt-oss:20b`
-- `uv run alife run --task two_sum_sorted --seed 7 --bootstrap-backend ollama --unsafe-process-backend` (explicit opt-in required if using `sandbox_backend: process`)
-- `uv run alife spike docker-latency`
-- `uv run alife spike ast-feasibility`
-- `uv run alife spike parameter-sweep`
-- `uv run alife spike parameter-sweep --sweep-output sweep_summary.json`
-- `uv run alife spike parameter-sweep --unsafe-process-backend` (explicit opt-in)
+### Setup
+```bash
+uv sync --group dev
+```
 
-## Sandbox execution
-Evaluator supports two backends:
-- `docker` (default): containerized execution boundary for untrusted candidate code
-- `process`: local subprocess fallback, mainly for development/testing
+### Validate
+```bash
+uv run --group dev pytest
+uv run --group dev ruff check .
+uv run --group dev ruff format --check .
+```
 
-Configure via `configs/default.yaml` or `RunConfig`.
+## Usage
+### Run an experiment
+```bash
+uv run alife run --task two_sum_sorted --seed 7
+```
 
-Population mode notes:
-- `max_generations` counts reproduction rounds; runtime evaluates `max_generations + 1` checkpoints (including generation 0 baseline).
-- `population_workers` is capped at runtime by both `population_size` and host CPU count.
+### Run population mode
+```bash
+uv run alife run \
+  --task two_sum_sorted \
+  --seed 7 \
+  --population \
+  --population-size 12 \
+  --elite-count 3 \
+  --max-generations 30 \
+  --population-workers 4
+```
+
+### Use Ollama bootstrap
+```bash
+uv run alife run --task two_sum_sorted --seed 7 --bootstrap-backend ollama --ollama-model gpt-oss:20b
+```
+
+### Spikes
+```bash
+uv run alife spike docker-latency
+uv run alife spike ast-feasibility
+uv run alife spike schedule-curve
+uv run alife spike parameter-sweep
+uv run alife spike parameter-sweep --sweep-output sweep_summary.json
+```
+
+## Safety model
+- Default boundary is Docker with restricted runtime settings.
+- `process` backend is available for local development/testing only.
+- Explicit opt-in is required for unsafe combinations:
+```bash
+uv run alife run --task two_sum_sorted --unsafe-process-backend
+uv run alife spike parameter-sweep --unsafe-process-backend
+```
+
+## Repository docs
+- `AGENTS.md`: instructions for coding agents and contributors.
+- `PRODUCT.md`: product purpose and objectives.
+- `TECH.md`: stack and technical constraints.
+- `STRUCTURE.md`: file/module organization and conventions.
+- `docs/legacy/`: historical planning/research docs.
+
+## CI
+GitHub Actions (`.github/workflows/ci.yml`) runs:
+- tests (`pytest`)
+- lint (`ruff check`)
+- format check (`ruff format --check`)
