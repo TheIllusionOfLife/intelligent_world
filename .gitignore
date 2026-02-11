@@ -1,7 +1,14 @@
+# Python caches
 __pycache__/
 *.py[cod]
 .pytest_cache/
+.ruff_cache/
+
+# Virtual environments
 .venv/
+
+# Runtime/generated artifacts
 logs/
 organisms/
+sweep_runs/
 sweep_summary.json
