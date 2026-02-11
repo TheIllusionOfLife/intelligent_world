@@ -18,6 +18,7 @@ uv run alife spike docker-latency
 uv run alife spike ast-feasibility
 uv run alife spike schedule-curve
 uv run alife spike parameter-sweep
+uv run alife spike metrics-report --log-path logs/<run-id>.jsonl
 ```
 
 Commands agents often miss:
@@ -93,6 +94,7 @@ uv run alife spike parameter-sweep --sweep-output sweep_summary.json
 - `max_generations` counts reproduction rounds; evaluation includes generation `0` baseline.
 - `population_workers` is capped at runtime by CPU count and `population_size`.
 - Use repository-relative output paths for sweep artifacts to avoid path validation errors.
+- Runtime JSONL logs use schema v2 envelopes (`event_type` + nested `payload`).
 
 ## Directory intent
 - Root: active project entry docs and build metadata.

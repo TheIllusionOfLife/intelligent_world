@@ -42,3 +42,8 @@ max_generations: 50
 population_workers: 4
 diversity_window: 5
 min_diversity_score: 0.2
+event_schema_version: 2
+novelty_k: 3
+convergence_patience: 5
+convergence_entropy_floor: 0.15
+convergence_fitness_delta_floor: 0.005

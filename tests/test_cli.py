@@ -87,6 +87,11 @@ def test_cli_supports_run_and_spike_commands() -> None:
     )
     assert sweep_args_with_output.sweep_output == "tmp/sweep.json"
 
+    metrics_args = parser.parse_args(["spike", "metrics-report", "--log-path", "logs/run.jsonl"])
+    assert metrics_args.command == "spike"
+    assert metrics_args.spike_command == "metrics-report"
+    assert metrics_args.log_path == "logs/run.jsonl"
+
 
 def test_dispatch_run_invokes_runtime(monkeypatch, tmp_path: Path) -> None:
     called = {}
@@ -260,3 +265,21 @@ def test_dispatch_run_can_enable_population_overrides(monkeypatch, tmp_path: Pat
     assert called["mutation_rate_override"] == 0.7
     assert called["max_generations_override"] == 15
     assert called["population_workers_override"] == 6
+
+
+def test_dispatch_spike_calls_metrics_report(monkeypatch) -> None:
+    called = {"metrics": False}
+
+    def fake_metrics_report(log_path):
+        called["metrics"] = True
+        assert log_path == "logs/run.jsonl"
+        return {"schema_version": 2, "generations": 3}
+
+    monkeypatch.setattr(cli, "run_metrics_report_spike", fake_metrics_report)
+
+    parser = cli.build_parser()
+    args = parser.parse_args(["spike", "metrics-report", "--log-path", "logs/run.jsonl"])
+    exit_code = cli._dispatch(args)
+
+    assert exit_code == 0
+    assert called["metrics"] is True

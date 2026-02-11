@@ -21,15 +21,23 @@ def write_run_start(
     cpu_architecture: str,
     parameters: dict[str, object],
 ) -> None:
-    payload = {
-        "type": "run_start",
-        "timestamp": datetime.now(UTC).isoformat(),
-        "run_id": run_id,
-        "random_seed": config.seed,
-        "framework_git_sha": framework_git_sha,
-        "docker_image_digest": docker_image_digest,
-        "python_version": python_version,
-        "cpu_architecture": cpu_architecture,
-        "parameters": parameters,
-    }
-    write_event(log_path, payload)
+    write_event(
+        log_path,
+        {
+            "schema_version": config.event_schema_version,
+            "event_type": "run.started",
+            "timestamp": datetime.now(UTC).isoformat(),
+            "run_id": run_id,
+            "mode": config.evolution_mode,
+            "task": None,
+            "step": 0,
+            "payload": {
+                "random_seed": config.seed,
+                "framework_git_sha": framework_git_sha,
+                "docker_image_digest": docker_image_digest,
+                "python_version": python_version,
+                "cpu_architecture": cpu_architecture,
+                "parameters": parameters,
+            },
+        },
+    )

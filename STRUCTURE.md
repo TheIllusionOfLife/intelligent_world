@@ -17,6 +17,7 @@
 - `mutation/`: candidate validation gates
 - `agent/`: progression/curriculum lifecycle logic
 - `logging/`: structured run/event logging helpers
+- `metrics/`: evolutionary metrics computation (diversity, entropy, novelty, lineage, AST complexity)
 - `bootstrap/`: initial candidate generation (`static`/`ollama`)
 
 ## Naming conventions
@@ -40,6 +41,7 @@
 - `runtime.py` owns experiment flow, lifecycle transitions, and high-level policy checks.
 - `evaluator/` owns sandbox execution and correctness scoring.
 - `mutation/` owns validation gates; do not embed gate logic in CLI.
+- `metrics/` owns deterministic population analytics for logging/reporting.
 
 ## Generated artifacts
 - Runtime artifacts:
