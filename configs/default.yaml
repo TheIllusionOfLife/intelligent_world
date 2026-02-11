@@ -1,0 +1,6 @@
+seed: 0
+w1_pass_ratio: 0.9
+w2_ast_edit_cost: 0.1
+base_survival_cost: 0.01
+pass_ratio_threshold: 0.9
+fitness_threshold: 0.7
