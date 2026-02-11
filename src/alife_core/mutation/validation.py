@@ -8,13 +8,37 @@ _FORBIDDEN_IMPORTS = {
     "io",
     "os",
     "pathlib",
+    "pickle",
     "shutil",
     "signal",
     "socket",
     "subprocess",
     "sys",
+    "tempfile",
 }
-_FORBIDDEN_CALLS = {"open", "exec", "eval", "compile", "__import__"}
+_FORBIDDEN_CALLS = {
+    "__import__",
+    "compile",
+    "delattr",
+    "eval",
+    "exec",
+    "getattr",
+    "globals",
+    "locals",
+    "open",
+    "setattr",
+}
+_FORBIDDEN_DUNDER_ATTRS = {
+    "__bases__",
+    "__class__",
+    "__closure__",
+    "__code__",
+    "__dict__",
+    "__globals__",
+    "__mro__",
+    "__subclasses__",
+}
+_FORBIDDEN_NAMES = {"__builtins__"}
 
 
 def _is_forbidden_import(node: ast.AST) -> bool:
@@ -39,6 +63,14 @@ def _attribute_path(node: ast.Attribute) -> str:
     if isinstance(current, ast.Name):
         parts.append(current.id)
     return ".".join(reversed(parts))
+
+
+def _has_forbidden_dunder_attribute(node: ast.AST) -> bool:
+    return isinstance(node, ast.Attribute) and node.attr in _FORBIDDEN_DUNDER_ATTRS
+
+
+def _is_forbidden_name(node: ast.AST) -> bool:
+    return isinstance(node, ast.Name) and node.id in _FORBIDDEN_NAMES
 
 
 def _is_forbidden_call(node: ast.AST) -> bool:
@@ -69,6 +101,18 @@ def validate_candidate(code: str) -> ValidationResult:
                 is_valid=False,
                 stage="ast_policy",
                 reason="forbidden import detected",
+            )
+        if _is_forbidden_name(node):
+            return ValidationResult(
+                is_valid=False,
+                stage="ast_policy",
+                reason="forbidden name detected",
+            )
+        if _has_forbidden_dunder_attribute(node):
+            return ValidationResult(
+                is_valid=False,
+                stage="ast_policy",
+                reason="forbidden attribute detected",
             )
         if _is_forbidden_call(node):
             return ValidationResult(

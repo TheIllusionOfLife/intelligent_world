@@ -1,6 +1,8 @@
 from dataclasses import dataclass
+from typing import Literal
 
 Case = tuple[tuple, object]
+SandboxBackend = Literal["docker", "process"]
 
 
 @dataclass(frozen=True)
@@ -12,6 +14,8 @@ class RunConfig:
     pass_ratio_threshold: float = 0.9
     fitness_threshold: float = 0.7
     exec_timeout_seconds: float = 1.0
+    sandbox_backend: SandboxBackend = "docker"
+    docker_image: str = "python:3.12-slim"
 
 
 @dataclass(frozen=True)

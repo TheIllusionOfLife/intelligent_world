@@ -18,10 +18,15 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _dispatch(_args: argparse.Namespace) -> int:
+    # Command handlers are intentionally thin in Phase 1 scaffolding.
+    return 0
+
+
 def main() -> int:
     parser = build_parser()
-    _args = parser.parse_args()  # TODO: dispatch to concrete command handlers.
-    return 0
+    args = parser.parse_args()
+    return _dispatch(args)
 
 
 if __name__ == "__main__":
