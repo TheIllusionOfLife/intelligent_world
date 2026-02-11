@@ -18,3 +18,13 @@ def test_validation_rejects_syntax_error() -> None:
 
     assert result.is_valid is False
     assert result.stage == "parse"
+
+
+def test_validation_rejects_forbidden_attribute_call() -> None:
+    code = "import builtins\n\ndef solve(x):\n    return builtins.exec('x=1')\n"
+
+    result = validate_candidate(code)
+
+    assert result.is_valid is False
+    assert result.stage == "ast_policy"
+    assert "forbidden call" in result.reason

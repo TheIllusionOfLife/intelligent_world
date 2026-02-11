@@ -35,3 +35,44 @@ def test_hidden_tests_do_not_change_fitness_in_phase1() -> None:
     assert result.train_pass_ratio == 1.0
     assert result.hidden_pass_ratio == 0.0
     assert result.fitness == 1.0
+
+
+def test_missing_function_symbol_returns_zero_score() -> None:
+    task = TaskSpec(
+        name="missing",
+        prompt="does not define solve",
+        function_name="solve",
+        train_cases=[((1,), 2)],
+        hidden_cases=[((2,), 3)],
+    )
+    code = "def nope(x):\n    return x + 1\n"
+
+    result = evaluate_candidate(code=code, task=task, edit_cost=0.3, config=RunConfig())
+
+    assert result.train_pass_ratio == 0.0
+    assert result.hidden_pass_ratio == 0.0
+    assert result.fitness == 0.0
+    assert result.train_failures == 1
+    assert result.hidden_failures == 1
+
+
+def test_top_level_infinite_loop_times_out_instead_of_hanging() -> None:
+    task = TaskSpec(
+        name="timeout",
+        prompt="hangs at module import",
+        function_name="solve",
+        train_cases=[((1,), 2)],
+        hidden_cases=[],
+    )
+    code = "while True:\n    pass\n\ndef solve(x):\n    return x + 1\n"
+
+    result = evaluate_candidate(
+        code=code,
+        task=task,
+        edit_cost=0.0,
+        config=RunConfig(exec_timeout_seconds=0.1),
+    )
+
+    assert result.train_failures == 1
+    assert result.hidden_failures == 0
+    assert result.fitness == 0.0

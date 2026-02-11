@@ -20,7 +20,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main() -> int:
     parser = build_parser()
-    parser.parse_args()
+    _args = parser.parse_args()  # TODO: dispatch to concrete command handlers.
     return 0
 
 

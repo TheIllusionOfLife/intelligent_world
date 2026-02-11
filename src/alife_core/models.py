@@ -1,4 +1,6 @@
-from dataclasses import dataclass, field
+from dataclasses import dataclass
+
+Case = tuple[tuple, object]
 
 
 @dataclass(frozen=True)
@@ -9,6 +11,7 @@ class RunConfig:
     base_survival_cost: float = 0.01
     pass_ratio_threshold: float = 0.9
     fitness_threshold: float = 0.7
+    exec_timeout_seconds: float = 1.0
 
 
 @dataclass(frozen=True)
@@ -16,8 +19,8 @@ class TaskSpec:
     name: str
     prompt: str
     function_name: str
-    train_cases: list[tuple[tuple, object]] = field(default_factory=list)
-    hidden_cases: list[tuple[tuple, object]] = field(default_factory=list)
+    train_cases: tuple[Case, ...] = ()
+    hidden_cases: tuple[Case, ...] = ()
 
 
 @dataclass(frozen=True)
