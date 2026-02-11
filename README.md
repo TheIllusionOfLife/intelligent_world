@@ -10,6 +10,7 @@ Phase 1 scaffold for a minimal ALife runtime focused on deterministic evaluation
 
 ## CLI
 - `uv run alife run --task two_sum_sorted --seed 7`
+- `uv run alife run --task two_sum_sorted --seed 7 --population --population-size 12 --elite-count 3 --max-generations 30 --population-workers 4`
 - `uv run alife run --task two_sum_sorted --seed 7 --bootstrap-backend ollama --ollama-model gpt-oss:20b`
 - `uv run alife run --task two_sum_sorted --seed 7 --bootstrap-backend ollama --unsafe-process-backend` (explicit opt-in required if using `sandbox_backend: process`)
 - `uv run alife spike docker-latency`
@@ -24,3 +25,7 @@ Evaluator supports two backends:
 - `process`: local subprocess fallback, mainly for development/testing
 
 Configure via `configs/default.yaml` or `RunConfig`.
+
+Population mode notes:
+- `max_generations` counts reproduction rounds; runtime evaluates `max_generations + 1` checkpoints (including generation 0 baseline).
+- `population_workers` is capped at runtime by both `population_size` and host CPU count.

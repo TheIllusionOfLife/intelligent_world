@@ -32,6 +32,10 @@ def run_parameter_sweep(
     allow_unsafe_process_backend: bool = False,
 ) -> list[dict[str, float | int]]:
     sweep_root = Path(output_root)
+    safe_output_path: Path | None = None
+    if output_path is not None:
+        safe_output_path = _resolve_safe_output_path(sweep_root, output_path)
+
     if sandbox_backend == "process":
         if not allow_unsafe_process_backend:
             raise ValueError(
@@ -65,12 +69,19 @@ def run_parameter_sweep(
                 n_stagnation=params["n_stagnation"],
                 mutation_stagnation_window=params["mutation_stagnation_window"],
             )
-            summary = run_experiment(
-                task_name=task_name,
-                config=config,
-                output_root=sweep_root / "sweep_runs",
-            )
-            completed_counts.append(len(summary.completed_tasks))
+            try:
+                summary = run_experiment(
+                    task_name=task_name,
+                    config=config,
+                    output_root=sweep_root / "sweep_runs",
+                )
+                completed_counts.append(len(summary.completed_tasks))
+            except RuntimeError as exc:
+                if sandbox_backend == "docker" and "docker daemon unavailable" in str(exc).lower():
+                    raise RuntimeError(
+                        "Sweep aborted: docker daemon unavailable for docker sandbox backend"
+                    ) from exc
+                raise
 
         rows.append(
             {
@@ -81,8 +92,7 @@ def run_parameter_sweep(
             }
         )
 
-    if output_path is not None:
-        safe_output_path = _resolve_safe_output_path(sweep_root, output_path)
+    if safe_output_path is not None:
         safe_output_path.parent.mkdir(parents=True, exist_ok=True)
         safe_output_path.write_text(json.dumps(rows, indent=2, sort_keys=True), encoding="utf-8")
 

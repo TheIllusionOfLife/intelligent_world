@@ -30,6 +30,7 @@ def test_cli_supports_run_and_spike_commands() -> None:
     assert run_args.ollama_model == "gpt-oss:20b"
     assert run_args.unsafe_process_backend is True
     assert run_args.curriculum is True
+    assert run_args.population is False
 
     run_args_no_curriculum = parser.parse_args(
         [
@@ -40,6 +41,37 @@ def test_cli_supports_run_and_spike_commands() -> None:
         ]
     )
     assert run_args_no_curriculum.curriculum is False
+
+    run_args_population = parser.parse_args(
+        [
+            "run",
+            "--task",
+            "two_sum_sorted",
+            "--population",
+            "--population-size",
+            "8",
+            "--elite-count",
+            "2",
+            "--tournament-k",
+            "3",
+            "--crossover-rate",
+            "0.7",
+            "--mutation-rate",
+            "0.8",
+            "--max-generations",
+            "12",
+            "--population-workers",
+            "5",
+        ]
+    )
+    assert run_args_population.population is True
+    assert run_args_population.population_size == 8
+    assert run_args_population.elite_count == 2
+    assert run_args_population.tournament_k == 3
+    assert run_args_population.crossover_rate == 0.7
+    assert run_args_population.mutation_rate == 0.8
+    assert run_args_population.max_generations == 12
+    assert run_args_population.population_workers == 5
 
     spike_args = parser.parse_args(["spike", "docker-latency"])
     assert spike_args.command == "spike"
@@ -173,3 +205,58 @@ def test_dispatch_run_can_disable_curriculum(monkeypatch, tmp_path: Path) -> Non
 
     assert exit_code == 0
     assert called["run_curriculum_override"] is False
+
+
+def test_dispatch_run_can_enable_population_overrides(monkeypatch, tmp_path: Path) -> None:
+    called = {}
+
+    def fake_load(_path, **kwargs):
+        called.update(kwargs)
+        return RunConfig(seed=0)
+
+    monkeypatch.setattr(cli, "load_run_config", fake_load)
+    monkeypatch.setattr(
+        cli,
+        "run_experiment",
+        lambda task_name, config, output_root: SimpleNamespace(
+            run_id="run-1",
+            log_path=tmp_path / "logs" / "run-1.jsonl",
+            completed_tasks=[task_name],
+        ),
+    )
+
+    parser = cli.build_parser()
+    args = parser.parse_args(
+        [
+            "run",
+            "--task",
+            "two_sum_sorted",
+            "--population",
+            "--population-size",
+            "6",
+            "--elite-count",
+            "2",
+            "--tournament-k",
+            "4",
+            "--crossover-rate",
+            "0.6",
+            "--mutation-rate",
+            "0.7",
+            "--max-generations",
+            "15",
+            "--population-workers",
+            "6",
+        ]
+    )
+
+    exit_code = cli._dispatch(args)
+
+    assert exit_code == 0
+    assert called["evolution_mode_override"] == "population"
+    assert called["population_size_override"] == 6
+    assert called["elite_count_override"] == 2
+    assert called["tournament_k_override"] == 4
+    assert called["crossover_rate_override"] == 0.6
+    assert called["mutation_rate_override"] == 0.7
+    assert called["max_generations_override"] == 15
+    assert called["population_workers_override"] == 6

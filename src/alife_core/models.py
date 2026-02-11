@@ -4,6 +4,7 @@ from typing import Literal
 Case = tuple[tuple, object]
 SandboxBackend = Literal["docker", "process"]
 BootstrapBackend = Literal["static", "ollama"]
+EvolutionMode = Literal["single_agent", "population"]
 
 
 @dataclass(frozen=True)
@@ -43,6 +44,17 @@ class RunConfig:
     viability_window: int = 20
     viability_min_improvement_rate: float = 0.05
 
+    evolution_mode: EvolutionMode = "single_agent"
+    population_size: int = 8
+    elite_count: int = 2
+    tournament_k: int = 3
+    crossover_rate: float = 0.7
+    mutation_rate: float = 0.9
+    max_generations: int = 50
+    population_workers: int = 4
+    diversity_window: int = 5
+    min_diversity_score: float = 0.2
+
 
 @dataclass(frozen=True)
 class TaskSpec:
@@ -68,3 +80,11 @@ class ValidationResult:
     is_valid: bool
     stage: str
     reason: str = ""
+
+
+@dataclass(frozen=True)
+class OrganismState:
+    code: str
+    fitness: float
+    train_pass_ratio: float
+    hidden_pass_ratio: float
