@@ -642,10 +642,6 @@ def _tournament_select(
     return max(candidates, key=lambda item: item.fitness)
 
 
-def _ast_shape_fingerprint(source: str) -> str:
-    return ast_shape_fingerprint(source)
-
-
 def _crossover_code(parent_a: str, parent_b: str, rng: random.Random) -> str:
     try:
         tree_a = ast.parse(parent_a)

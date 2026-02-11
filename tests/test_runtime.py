@@ -422,12 +422,12 @@ def test_run_experiment_fails_fast_when_docker_unavailable(monkeypatch, tmp_path
 
 
 def test_ast_shape_fingerprint_ignores_names_and_constants() -> None:
-    from alife_core import runtime
+    from alife_core.metrics.evolution import ast_shape_fingerprint
 
     left = "def solve(x):\n    value = x + 1\n    return value\n"
     right = "def solve(y):\n    other = y + 2\n    return other\n"
 
-    assert runtime._ast_shape_fingerprint(left) == runtime._ast_shape_fingerprint(right)
+    assert ast_shape_fingerprint(left) == ast_shape_fingerprint(right)
 
 
 def test_crossover_code_returns_parseable_candidate_for_structured_parents() -> None:
