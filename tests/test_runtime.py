@@ -304,7 +304,7 @@ def test_mutate_code_can_adjust_comparison_operator() -> None:
 
     source = "def solve(x, y):\n    if x < y:\n        return x\n    return y\n"
 
-    mutated = runtime._mutate_code(source, FakeRng(), intensity=1)
+    mutated, _llm = runtime._mutate_code(source, FakeRng(), intensity=1)
 
     assert "if x < y" not in mutated
 
@@ -565,7 +565,10 @@ def test_population_mode_checks_final_generation_candidate(monkeypatch, tmp_path
     monkeypatch.setattr(
         runtime,
         "_mutate_code",
-        lambda code, rng, intensity=1, prefer_structural=False, enable_semantic=False: code,
+        lambda code, rng, intensity=1, prefer_structural=False, enable_semantic=False, **kw: (
+            code,
+            0,
+        ),
     )
 
     config = RunConfig(

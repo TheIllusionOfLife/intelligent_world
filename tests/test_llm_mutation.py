@@ -11,7 +11,9 @@ class TestMutateWithLlm:
         """LLM mutation returns the LLM-generated code when it's valid Python."""
         import subprocess
 
-        improved_code = "def solve(x, y):\n    left = 0\n    right = len(x) - 1\n    return (1, 1)\n"
+        improved_code = (
+            "def solve(x, y):\n    left = 0\n    right = len(x) - 1\n    return (1, 1)\n"
+        )
 
         class FakeResult:
             returncode = 0
@@ -171,9 +173,7 @@ class TestLlmMutationConfig:
 
 
 class TestLlmMutationIntegration:
-    def test_mutate_code_uses_llm_when_enabled_and_budget_available(
-        self, monkeypatch
-    ) -> None:
+    def test_mutate_code_uses_llm_when_enabled_and_budget_available(self, monkeypatch) -> None:
         """When LLM mutation is enabled and budget > 0, _mutate_code can invoke it."""
         from alife_core import runtime
 
@@ -183,14 +183,9 @@ class TestLlmMutationIntegration:
             llm_calls.append(source)
             return source.replace("return (1, 1)", "return (1, 2)")
 
-        monkeypatch.setattr(
-            "alife_core.mutation.llm.mutate_with_llm", fake_llm_mutate
-        )
+        monkeypatch.setattr("alife_core.mutation.llm.mutate_with_llm", fake_llm_mutate)
 
-        source = (
-            "def two_sum_sorted(numbers, target):\n"
-            "    return (1, 1)\n"
-        )
+        source = "def two_sum_sorted(numbers, target):\n    return (1, 1)\n"
         rng = random.Random(42)
 
         # Force LLM path by calling with high rate
@@ -219,14 +214,9 @@ class TestLlmMutationIntegration:
             llm_calls.append(source)
             return source.replace("return (1, 1)", "return (1, 2)")
 
-        monkeypatch.setattr(
-            "alife_core.mutation.llm.mutate_with_llm", fake_llm_mutate
-        )
+        monkeypatch.setattr("alife_core.mutation.llm.mutate_with_llm", fake_llm_mutate)
 
-        source = (
-            "def two_sum_sorted(numbers, target):\n"
-            "    return (1, 1)\n"
-        )
+        source = "def two_sum_sorted(numbers, target):\n    return (1, 1)\n"
         rng = random.Random(42)
 
         _result, llm_used = runtime._mutate_code(
@@ -253,14 +243,9 @@ class TestLlmMutationIntegration:
             llm_calls.append(source)
             return source.replace("return (1, 1)", "return (1, 2)")
 
-        monkeypatch.setattr(
-            "alife_core.mutation.llm.mutate_with_llm", fake_llm_mutate
-        )
+        monkeypatch.setattr("alife_core.mutation.llm.mutate_with_llm", fake_llm_mutate)
 
-        source = (
-            "def two_sum_sorted(numbers, target):\n"
-            "    return (1, 1)\n"
-        )
+        source = "def two_sum_sorted(numbers, target):\n    return (1, 1)\n"
         rng = random.Random(42)
 
         _result, llm_used = runtime._mutate_code(
@@ -277,23 +262,16 @@ class TestLlmMutationIntegration:
         assert not llm_calls, "LLM mutation should NOT be called when enable_llm=False"
         assert llm_used == 0
 
-    def test_mutate_code_falls_back_to_ast_when_llm_returns_none(
-        self, monkeypatch
-    ) -> None:
+    def test_mutate_code_falls_back_to_ast_when_llm_returns_none(self, monkeypatch) -> None:
         """When LLM mutation returns None, _mutate_code falls back to AST mutation."""
         from alife_core import runtime
 
         def fake_llm_mutate(source, rng, model, timeout):
             return None  # LLM failed
 
-        monkeypatch.setattr(
-            "alife_core.mutation.llm.mutate_with_llm", fake_llm_mutate
-        )
+        monkeypatch.setattr("alife_core.mutation.llm.mutate_with_llm", fake_llm_mutate)
 
-        source = (
-            "def two_sum_sorted(numbers, target):\n"
-            "    return (1, 1)\n"
-        )
+        source = "def two_sum_sorted(numbers, target):\n    return (1, 1)\n"
         rng = random.Random(42)
 
         result, llm_used = runtime._mutate_code(

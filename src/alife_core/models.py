@@ -63,6 +63,9 @@ class RunConfig:
     use_persistent_docker: bool = False
     enable_semantic_mutation: bool = False
 
+    llm_mutation_rate: float = 0.05
+    llm_mutation_budget: int = 20
+
 
 @dataclass(frozen=True)
 class TaskSpec:

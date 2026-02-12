@@ -289,8 +289,24 @@ def _mutate_code(
     intensity: int = 1,
     prefer_structural: bool = False,
     enable_semantic: bool = False,
-) -> str:
-    # Try semantic mutation first if enabled (30% chance per intensity round)
+    enable_llm: bool = False,
+    llm_mutation_rate: float = 0.05,
+    llm_budget_remaining: int = 0,
+    llm_model: str = "",
+    llm_timeout: float = 20.0,
+) -> tuple[str, int]:
+    """Mutate code and return (mutated_code, llm_calls_consumed)."""
+    # Try LLM mutation first if enabled, budget available, and RNG selects it
+    llm_calls = 0
+    if enable_llm and llm_budget_remaining > 0 and rng.random() < llm_mutation_rate:
+        from alife_core.mutation.llm import mutate_with_llm
+
+        llm_calls = 1
+        result = mutate_with_llm(current, rng, model=llm_model, timeout=llm_timeout)
+        if result is not None:
+            return result, llm_calls
+
+    # Try semantic mutation if enabled (30% chance per intensity round)
     if enable_semantic:
         from alife_core.mutation.semantic import (
             mutate_guard_insertion,
@@ -308,7 +324,7 @@ def _mutate_code(
                 op_name = rng.choice(_SEMANTIC_MUTATORS)
                 result = _semantic_dispatch[op_name](current, rng)
                 if result != current:
-                    return result
+                    return result, llm_calls
 
     tree = ast.parse(current)
     order = (
@@ -323,7 +339,7 @@ def _mutate_code(
         for mutator_name in probe_order:
             if _MUTATORS[mutator_name](tree, rng):
                 break
-    return ast.unparse(tree) + "\n"
+    return ast.unparse(tree) + "\n", llm_calls
 
 
 def _resolve_docker_digest(config: RunConfig) -> str:
@@ -400,6 +416,7 @@ def run_single_agent_experiment(task_name: str, config: RunConfig, output_root: 
     completed_tasks: list[str] = []
     state: AgentState | None = None
     current_task_index = task_names.index(task_name)
+    llm_budget_remaining = config.llm_mutation_budget
     while current_task_index < len(task_names):
         task = tasks[task_names[current_task_index]]
         mutation_outcomes: deque[tuple[bool, bool]] = deque(maxlen=max(1, config.viability_window))
@@ -515,13 +532,21 @@ def run_single_agent_experiment(task_name: str, config: RunConfig, output_root: 
             if mutation_fallback_active:
                 mutation_size += 1
                 mutation_mode = "fallback_template"
-            candidate_code = _mutate_code(
+            candidate_code, llm_used = _mutate_code(
                 current_code,
                 rng,
                 intensity=mutation_size,
                 prefer_structural=mutation_fallback_active,
                 enable_semantic=config.enable_semantic_mutation,
+                enable_llm=config.llm_mutation_rate > 0,
+                llm_mutation_rate=config.llm_mutation_rate,
+                llm_budget_remaining=llm_budget_remaining,
+                llm_model=config.ollama_model,
+                llm_timeout=config.bootstrap_timeout_seconds,
             )
+            llm_budget_remaining -= llm_used
+            if llm_used > 0:
+                mutation_mode = "llm"
             validation = validate_candidate(candidate_code)
 
             if not validation.is_valid:
@@ -645,6 +670,7 @@ def run_single_agent_experiment(task_name: str, config: RunConfig, output_root: 
                     "rolling_improvement_rate": rolling_improvement_rate,
                     "mutation_fallback_active": mutation_fallback_active,
                     "mutation_mode": mutation_mode,
+                    "llm_budget_remaining": llm_budget_remaining,
                     "hard_failure": candidate_eval.hard_failure,
                     "execution_status": candidate_eval.execution_status,
                     "error_type": candidate_eval.error_type,
@@ -808,7 +834,7 @@ def _initialize_population_for_task(
         if attempts > config.population_size * 20:
             population_codes.append(bootstrap_code)
             continue
-        candidate = _mutate_code(
+        candidate, _llm_used = _mutate_code(
             bootstrap_code,
             rng,
             intensity=1,
@@ -1015,7 +1041,7 @@ def run_population_experiment(task_name: str, config: RunConfig, output_root: Pa
                         payload={"generation": generation, "parent_ids": parent_ids},
                     )
                 if rng.random() < config.mutation_rate:
-                    child_code = _mutate_code(
+                    child_code, _llm_used = _mutate_code(
                         child_code,
                         rng,
                         intensity=1,
