@@ -1,8 +1,12 @@
 import ast
+import gzip
 import logging
 import math
 import statistics
+import tokenize
+from collections import Counter
 from dataclasses import dataclass
+from io import BytesIO
 
 from alife_core.models import OrganismState
 
@@ -65,6 +69,96 @@ def _normalized_levenshtein(left: str, right: str) -> float:
     return prev[-1] / max(len(left), len(right))
 
 
+def kolmogorov_complexity_proxy(codes: list[str]) -> float:
+    """Mean gzip compression ratio across code strings (proxy for Kolmogorov complexity)."""
+    if not codes:
+        return 0.0
+    ratios: list[float] = []
+    for code in codes:
+        raw = code.encode("utf-8")
+        if not raw:
+            continue
+        compressed = gzip.compress(raw)
+        ratios.append(len(compressed) / len(raw))
+    return statistics.fmean(ratios) if ratios else 0.0
+
+
+def cumulative_complexity_delta(
+    current_mean_depth: float,
+    initial_mean_depth: float,
+) -> float:
+    """Difference between current and initial mean AST depth."""
+    return current_mean_depth - initial_mean_depth
+
+
+def specialization_score(pass_matrices: list[list[bool]]) -> float:
+    """Measure how specialized organisms are on different test case subsets.
+
+    0.0 = all identical pass patterns, 1.0 = fully specialized (no overlap).
+    Uses mean pairwise Jaccard distance across organisms.
+    """
+    if len(pass_matrices) < 2:
+        return 0.0
+    n_cases = len(pass_matrices[0]) if pass_matrices[0] else 0
+    if n_cases == 0:
+        return 0.0
+
+    distances: list[float] = []
+    for i in range(len(pass_matrices)):
+        for j in range(i + 1, len(pass_matrices)):
+            set_a = {k for k, v in enumerate(pass_matrices[i]) if v}
+            set_b = {k for k, v in enumerate(pass_matrices[j]) if v}
+            union = set_a | set_b
+            if not union:
+                distances.append(0.0)
+                continue
+            intersection = set_a & set_b
+            distances.append(1.0 - len(intersection) / len(union))
+    return statistics.fmean(distances) if distances else 0.0
+
+
+def code_token_zipf_coefficient(code: str) -> float:
+    """Fit power-law exponent to token frequency distribution.
+
+    Life-like systems tend to follow Zipf's law (exponent near 1.0).
+    Uses least-squares fit on log-log data.
+    """
+    if not code.strip():
+        return 0.0
+    try:
+        tokens = list(tokenize.tokenize(BytesIO(code.encode("utf-8")).readline))
+    except tokenize.TokenError:
+        return 0.0
+
+    token_strings = [
+        tok.string
+        for tok in tokens
+        if tok.type not in (tokenize.ENCODING, tokenize.NEWLINE, tokenize.NL, tokenize.ENDMARKER)
+        and tok.string.strip()
+    ]
+    if len(token_strings) < 2:
+        return 0.0
+
+    freq_counts = Counter(token_strings)
+    frequencies = sorted(freq_counts.values(), reverse=True)
+    if len(frequencies) < 2:
+        return 0.0
+
+    # Least-squares fit of log(freq) = -alpha * log(rank) + c
+    log_ranks = [math.log(rank) for rank in range(1, len(frequencies) + 1)]
+    log_freqs = [math.log(freq) for freq in frequencies]
+    n = len(log_ranks)
+    sum_x = sum(log_ranks)
+    sum_y = sum(log_freqs)
+    sum_xy = sum(x * y for x, y in zip(log_ranks, log_freqs, strict=True))
+    sum_xx = sum(x * x for x in log_ranks)
+    denominator = n * sum_xx - sum_x * sum_x
+    if abs(denominator) < 1e-12:
+        return 0.0
+    slope = (n * sum_xy - sum_x * sum_y) / denominator
+    return abs(slope)
+
+
 @dataclass(frozen=True)
 class EvolutionMetrics:
     structural_diversity_ratio: float
@@ -78,6 +172,9 @@ class EvolutionMetrics:
     mean_novelty: float
     max_lineage_depth: int
     mean_lineage_depth: float
+    kolmogorov_complexity_proxy: float = 0.0
+    cumulative_complexity_delta: float = 0.0
+    code_token_zipf_coefficient: float = 0.0
 
 
 def compute_generation_metrics(
@@ -97,6 +194,9 @@ def compute_generation_metrics(
             mean_novelty=0.0,
             max_lineage_depth=0,
             mean_lineage_depth=0.0,
+            kolmogorov_complexity_proxy=0.0,
+            cumulative_complexity_delta=0.0,
+            code_token_zipf_coefficient=0.0,
         )
 
     fingerprints: list[str] = []
@@ -162,6 +262,12 @@ def compute_generation_metrics(
         novelty_scores.append(statistics.fmean(nearest))
 
     lineage_depths = [organism.lineage_depth for organism in population]
+    codes = [organism.code for organism in population]
+
+    kc_proxy = kolmogorov_complexity_proxy(codes)
+    mean_zipf = (
+        statistics.fmean([code_token_zipf_coefficient(code) for code in codes]) if codes else 0.0
+    )
 
     return EvolutionMetrics(
         structural_diversity_ratio=unique / total,
@@ -175,4 +281,6 @@ def compute_generation_metrics(
         mean_novelty=statistics.fmean(novelty_scores),
         max_lineage_depth=max(lineage_depths) if lineage_depths else 0,
         mean_lineage_depth=statistics.fmean(lineage_depths) if lineage_depths else 0.0,
+        kolmogorov_complexity_proxy=kc_proxy,
+        code_token_zipf_coefficient=mean_zipf,
     )

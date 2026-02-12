@@ -878,6 +878,9 @@ def run_population_experiment(task_name: str, config: RunConfig, output_root: Pa
                     "mean_novelty": metrics.mean_novelty,
                     "max_lineage_depth": metrics.max_lineage_depth,
                     "mean_lineage_depth": metrics.mean_lineage_depth,
+                    "kolmogorov_complexity_proxy": metrics.kolmogorov_complexity_proxy,
+                    "cumulative_complexity_delta": metrics.cumulative_complexity_delta,
+                    "code_token_zipf_coefficient": metrics.code_token_zipf_coefficient,
                 },
             )
             _emit_event(
