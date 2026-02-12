@@ -4,6 +4,7 @@ import subprocess
 from multiprocessing import get_context
 from queue import Empty
 
+from alife_core.evaluator.docker_pool import DockerPool
 from alife_core.models import Case, EvaluationResult, RunConfig, TaskSpec
 
 _RUNNER_SCRIPT = r"""
@@ -182,6 +183,18 @@ def _run_docker_batch(
     return status, None
 
 
+_active_pool: DockerPool | None = None
+
+
+def get_docker_pool() -> DockerPool | None:
+    return _active_pool
+
+
+def set_docker_pool(pool: DockerPool | None) -> None:
+    global _active_pool  # noqa: PLW0603
+    _active_pool = pool
+
+
 def _execute_case_batch(
     code: str,
     function_name: str,
@@ -194,6 +207,13 @@ def _execute_case_batch(
             function_name=function_name,
             cases=cases,
             timeout_seconds=config.exec_timeout_seconds,
+        )
+
+    if config.use_persistent_docker and _active_pool is not None:
+        return _active_pool.execute(
+            code=code,
+            function_name=function_name,
+            cases=cases,
         )
 
     return _run_docker_batch(

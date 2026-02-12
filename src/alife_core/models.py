@@ -60,6 +60,8 @@ class RunConfig:
     convergence_entropy_floor: float = 0.15
     convergence_fitness_delta_floor: float = 0.005
 
+    use_persistent_docker: bool = False
+
 
 @dataclass(frozen=True)
 class TaskSpec:
