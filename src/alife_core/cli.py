@@ -45,6 +45,15 @@ def run_parameter_sweep_spike(
     )
 
 
+def run_mutation_viability_spike(
+    samples: int = 200,
+    chain_depth: int = 20,
+    seed: int = 0,
+) -> dict[str, dict[str, float]]:
+    module = _load_script_module("scripts/mutation_viability_spike.py")
+    return module.run_spike(samples=samples, chain_depth=chain_depth, seed=seed)
+
+
 def run_metrics_report_spike(log_path: str) -> dict[str, object]:
     module = _load_script_module("scripts/metrics_report.py")
     return module.summarize_metrics(log_path)
@@ -82,6 +91,10 @@ def build_parser() -> argparse.ArgumentParser:
     sweep_parser = spike_subparsers.add_parser("parameter-sweep")
     sweep_parser.add_argument("--sweep-output", default=None)
     sweep_parser.add_argument("--unsafe-process-backend", action="store_true")
+    viability_parser = spike_subparsers.add_parser("mutation-viability")
+    viability_parser.add_argument("--samples", type=int, default=200)
+    viability_parser.add_argument("--chain-depth", type=int, default=20)
+    viability_parser.add_argument("--seed", type=int, default=0)
     metrics_parser = spike_subparsers.add_parser("metrics-report")
     metrics_parser.add_argument("--log-path", required=True)
 
@@ -137,6 +150,19 @@ def _dispatch(args: argparse.Namespace) -> int:
                 run_parameter_sweep_spike(
                     output_path=args.sweep_output,
                     allow_unsafe_process_backend=args.unsafe_process_backend,
+                ),
+                sort_keys=True,
+            )
+        )
+        return 0
+
+    if args.spike_command == "mutation-viability":
+        print(
+            json.dumps(
+                run_mutation_viability_spike(
+                    samples=args.samples,
+                    chain_depth=args.chain_depth,
+                    seed=args.seed,
                 ),
                 sort_keys=True,
             )

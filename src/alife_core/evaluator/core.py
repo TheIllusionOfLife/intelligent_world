@@ -158,9 +158,18 @@ def _run_docker_batch(
     except subprocess.TimeoutExpired:
         return "timeout", None
     except FileNotFoundError:
-        return "compile_or_exec_error", None
+        return "docker_unavailable", None
 
     if completed.returncode != 0:
+        raw = completed.stderr or b""
+        stderr_text = raw.decode("utf-8", errors="replace") if isinstance(raw, bytes) else raw
+        lower = stderr_text.lower()
+        if (
+            "cannot connect" in lower
+            or "connection refused" in lower
+            or "is the docker daemon running" in lower
+        ):
+            return "docker_unavailable", None
         return "compile_or_exec_error", None
 
     try:
@@ -259,6 +268,11 @@ def evaluate_candidate(
     else:
         fitness = (config.w1_pass_ratio * train_pass_ratio) - (config.w2_ast_edit_cost * edit_cost)
 
+    if hard_failure:
+        execution_status = status if status != "ok" else "internal_error"
+    else:
+        execution_status = "ok"
+
     return EvaluationResult(
         train_pass_ratio=train_pass_ratio,
         hidden_pass_ratio=hidden_pass_ratio,
@@ -266,4 +280,6 @@ def evaluate_candidate(
         fitness=fitness,
         train_failures=train_failures,
         hidden_failures=hidden_failures,
+        hard_failure=hard_failure,
+        execution_status=execution_status,
     )

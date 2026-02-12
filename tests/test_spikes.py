@@ -223,6 +223,43 @@ def test_parameter_sweep_fails_fast_when_docker_unavailable(tmp_path: Path) -> N
         raise AssertionError("expected RuntimeError when docker daemon is unavailable")
 
 
+def test_mutation_viability_handles_zero_samples() -> None:
+    module = _load_script("scripts/mutation_viability_spike.py")
+
+    result = module.run_spike(samples=0)
+
+    for task_metrics in result.values():
+        assert task_metrics["syntactic_validity_rate"] == 0.0
+        assert task_metrics["fitness_improvement_rate"] == 0.0
+        assert task_metrics["non_destructive_rate"] == 0.0
+        assert task_metrics["mean_chain_survival_steps"] == 0.0
+
+
+def test_mutation_viability_returns_all_task_metrics() -> None:
+    module = _load_script("scripts/mutation_viability_spike.py")
+
+    result = module.run_spike(samples=10, chain_depth=3, seed=0)
+
+    assert "two_sum_sorted" in result
+    assert "run_length_encode" in result
+    assert "slugify" in result
+    for _task_name, metrics in result.items():
+        assert "syntactic_validity_rate" in metrics
+        assert "fitness_improvement_rate" in metrics
+        assert "non_destructive_rate" in metrics
+        assert "mean_chain_survival_steps" in metrics
+
+
+def test_mutation_viability_chain_reports_survival() -> None:
+    module = _load_script("scripts/mutation_viability_spike.py")
+
+    result = module.run_spike(samples=10, chain_depth=5, seed=0)
+
+    for _task_name, metrics in result.items():
+        assert "mean_chain_survival_steps" in metrics
+        assert isinstance(metrics["mean_chain_survival_steps"], (int, float))
+
+
 def test_metrics_report_handles_empty_metrics_log(tmp_path: Path) -> None:
     module = _load_script("scripts/metrics_report.py")
     log_path = tmp_path / "run.jsonl"
