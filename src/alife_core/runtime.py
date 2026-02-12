@@ -218,15 +218,17 @@ def _mutate_binop(tree: ast.AST, rng: random.Random) -> bool:
     return True
 
 
+_COMPARE_SWAP: dict[type, type] = {
+    ast.Lt: ast.Gt,
+    ast.Gt: ast.Lt,
+    ast.LtE: ast.GtE,
+    ast.GtE: ast.LtE,
+    ast.Eq: ast.NotEq,
+    ast.NotEq: ast.Eq,
+}
+
+
 def _mutate_compare(tree: ast.AST, rng: random.Random) -> bool:
-    _COMPARE_SWAP: dict[type, type] = {
-        ast.Lt: ast.Gt,
-        ast.Gt: ast.Lt,
-        ast.LtE: ast.GtE,
-        ast.GtE: ast.LtE,
-        ast.Eq: ast.NotEq,
-        ast.NotEq: ast.Eq,
-    }
     candidates = [
         node
         for node in ast.walk(tree)
@@ -258,7 +260,9 @@ def _mutate_constant(tree: ast.AST, rng: random.Random) -> bool:
     candidates = [
         node
         for node in ast.walk(tree)
-        if isinstance(node, ast.Constant) and isinstance(node.value, (int, float))
+        if isinstance(node, ast.Constant)
+        and isinstance(node.value, (int, float))
+        and not isinstance(node.value, bool)
     ]
     if not candidates:
         return False

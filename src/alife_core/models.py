@@ -79,7 +79,14 @@ class EvaluationResult:
     train_failures: int
     hidden_failures: int
     hard_failure: bool = False
-    execution_status: str = "ok"
+    execution_status: Literal[
+        "ok",
+        "timeout",
+        "docker_unavailable",
+        "compile_or_exec_error",
+        "missing_function",
+        "internal_error",
+    ] = "ok"
 
 
 @dataclass(frozen=True)

@@ -3,8 +3,9 @@
 
 import random
 
+from alife_core.bootstrap import static_seed
 from alife_core.evaluator.core import evaluate_candidate
-from alife_core.models import RunConfig
+from alife_core.models import RunConfig, TaskSpec
 from alife_core.mutation.validation import validate_candidate
 from alife_core.runtime import _mutate_code
 from alife_core.tasks.builtin import load_builtin_tasks
@@ -12,16 +13,8 @@ from alife_core.tasks.builtin import load_builtin_tasks
 _PROCESS_CONFIG = RunConfig(sandbox_backend="process", allow_unsafe_process_backend=True)
 
 
-def _bootstrap_code(task_name: str) -> str:
-    from alife_core.bootstrap import static_seed
-    from alife_core.tasks.builtin import load_builtin_tasks
-
-    tasks = load_builtin_tasks()
-    return static_seed(tasks[task_name])
-
-
 def _measure_task(
-    task_name: str,
+    task: TaskSpec,
     samples: int,
     chain_depth: int,
     rng: random.Random,
@@ -34,9 +27,7 @@ def _measure_task(
             "mean_chain_survival_steps": 0.0,
         }
 
-    tasks = load_builtin_tasks()
-    task = tasks[task_name]
-    base_code = _bootstrap_code(task_name)
+    base_code = static_seed(task)
     base_eval = evaluate_candidate(base_code, task=task, edit_cost=0.0, config=_PROCESS_CONFIG)
 
     valid_count = 0
@@ -95,8 +86,8 @@ def run_spike(
     rng = random.Random(seed)
     tasks = load_builtin_tasks()
     results: dict[str, dict[str, float]] = {}
-    for task_name in tasks:
-        results[task_name] = _measure_task(task_name, samples, chain_depth, rng)
+    for task_name, task in tasks.items():
+        results[task_name] = _measure_task(task, samples, chain_depth, rng)
     return results
 
 

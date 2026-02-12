@@ -268,7 +268,10 @@ def evaluate_candidate(
     else:
         fitness = (config.w1_pass_ratio * train_pass_ratio) - (config.w2_ast_edit_cost * edit_cost)
 
-    execution_status = status if status != "ok" or hard_failure else "ok"
+    if hard_failure:
+        execution_status = status if status != "ok" else "internal_error"
+    else:
+        execution_status = "ok"
 
     return EvaluationResult(
         train_pass_ratio=train_pass_ratio,

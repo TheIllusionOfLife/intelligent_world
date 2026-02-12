@@ -238,7 +238,7 @@ def test_mutation_viability_handles_zero_samples() -> None:
 def test_mutation_viability_returns_all_task_metrics() -> None:
     module = _load_script("scripts/mutation_viability_spike.py")
 
-    result = module.run_spike(samples=10, seed=0)
+    result = module.run_spike(samples=10, chain_depth=3, seed=0)
 
     assert "two_sum_sorted" in result
     assert "run_length_encode" in result

@@ -1,4 +1,5 @@
 import json
+import random
 from pathlib import Path
 
 from alife_core.models import RunConfig
@@ -696,7 +697,7 @@ def test_mutate_constant_distributes_across_all_constants() -> None:
     hit_counts = {1: 0, 2: 0, 3: 0}
 
     for seed in range(100):
-        rng = __import__("random").Random(seed)
+        rng = random.Random(seed)
         tree = ast.parse(source)
         changed = runtime._mutate_constant(tree, rng)
         if changed:
@@ -725,7 +726,7 @@ def test_mutate_binop_distributes_across_all_add_ops() -> None:
     second_changed = 0
 
     for seed in range(100):
-        rng = __import__("random").Random(seed)
+        rng = random.Random(seed)
         tree = ast.parse(source)
         changed = runtime._mutate_binop(tree, rng)
         if changed:
@@ -763,7 +764,7 @@ def test_mutate_compare_distributes_across_comparisons() -> None:
     second_changed = 0
 
     for seed in range(100):
-        rng = __import__("random").Random(seed)
+        rng = random.Random(seed)
         tree = ast.parse(source)
         changed = runtime._mutate_compare(tree, rng)
         if changed:
