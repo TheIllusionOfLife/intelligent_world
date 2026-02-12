@@ -78,6 +78,8 @@ class EvaluationResult:
     fitness: float
     train_failures: int
     hidden_failures: int
+    hard_failure: bool = False
+    execution_status: str = "ok"
 
 
 @dataclass(frozen=True)

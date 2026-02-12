@@ -454,6 +454,8 @@ def run_single_agent_experiment(task_name: str, config: RunConfig, output_root: 
                 "rolling_improvement_rate": 0.0,
                 "mutation_fallback_active": mutation_fallback_active,
                 "mutation_mode": "bootstrap",
+                "hard_failure": current_eval.hard_failure,
+                "execution_status": current_eval.execution_status,
             },
         )
 
@@ -602,6 +604,8 @@ def run_single_agent_experiment(task_name: str, config: RunConfig, output_root: 
                     "rolling_improvement_rate": rolling_improvement_rate,
                     "mutation_fallback_active": mutation_fallback_active,
                     "mutation_mode": mutation_mode,
+                    "hard_failure": candidate_eval.hard_failure,
+                    "execution_status": candidate_eval.execution_status,
                 },
             )
 

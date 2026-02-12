@@ -666,6 +666,27 @@ def test_population_mode_emits_schema_v2_generation_metrics(tmp_path: Path) -> N
     assert "shannon_entropy" in generation_metrics[0]["payload"]
 
 
+def test_step_event_includes_execution_status(tmp_path: Path) -> None:
+    config = RunConfig(
+        seed=7,
+        sandbox_backend="process",
+        bootstrap_backend="static",
+        max_steps=2,
+        n_stagnation=1,
+    )
+
+    summary = run_experiment(task_name="two_sum_sorted", config=config, output_root=tmp_path)
+    payloads = [
+        json.loads(line) for line in summary.log_path.read_text(encoding="utf-8").splitlines()
+    ]
+    step_events = [item for item in payloads if item["event_type"] == "step.evaluated"]
+
+    assert step_events
+    for event in step_events:
+        assert "execution_status" in event["payload"]
+        assert "hard_failure" in event["payload"]
+
+
 def test_evaluate_population_skips_pre_evaluated_organisms(monkeypatch) -> None:
     from alife_core import runtime
     from alife_core.models import EvaluationResult, OrganismState

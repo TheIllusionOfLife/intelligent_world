@@ -115,3 +115,73 @@ def test_evaluator_batches_case_execution(monkeypatch) -> None:
     assert len(calls[0]) == 5
     assert result.train_failures == 0
     assert result.hidden_failures == 0
+
+
+def test_evaluation_result_exposes_hard_failure_when_execution_fails() -> None:
+    task = TaskSpec(
+        name="broken",
+        prompt="code that does not compile",
+        function_name="solve",
+        train_cases=(((1,), 2),),
+        hidden_cases=(((2,), 3),),
+    )
+    code = "def not_valid_python(:\n"
+
+    result = evaluate_candidate(
+        code=code,
+        task=task,
+        edit_cost=0.0,
+        config=RunConfig(sandbox_backend="process"),
+    )
+
+    assert result.hard_failure is True
+    assert result.execution_status != "ok"
+
+
+def test_evaluation_result_ok_for_passing_code() -> None:
+    task = TaskSpec(
+        name="passing",
+        prompt="simple addition",
+        function_name="solve",
+        train_cases=(((1,), 2), ((10,), 11)),
+        hidden_cases=(((100,), 101),),
+    )
+    code = "def solve(x):\n    return x + 1\n"
+
+    result = evaluate_candidate(
+        code=code,
+        task=task,
+        edit_cost=0.0,
+        config=RunConfig(sandbox_backend="process"),
+    )
+
+    assert result.hard_failure is False
+    assert result.execution_status == "ok"
+
+
+def test_docker_unavailable_status_on_file_not_found(monkeypatch) -> None:
+    import alife_core.evaluator.core as core_mod
+
+    def raise_fnf(*args, **kwargs):
+        raise FileNotFoundError("docker not found")
+
+    monkeypatch.setattr(core_mod.subprocess, "run", raise_fnf)
+
+    task = TaskSpec(
+        name="docker_test",
+        prompt="test docker unavailable",
+        function_name="solve",
+        train_cases=(((1,), 2),),
+        hidden_cases=(),
+    )
+    code = "def solve(x):\n    return x + 1\n"
+    config = RunConfig(sandbox_backend="docker")
+
+    status, _outputs = core_mod._run_docker_batch(
+        code=code,
+        function_name=task.function_name,
+        cases=task.train_cases,
+        config=config,
+    )
+
+    assert status == "docker_unavailable"
