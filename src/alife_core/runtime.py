@@ -470,6 +470,8 @@ def run_single_agent_experiment(task_name: str, config: RunConfig, output_root: 
                 "mutation_mode": "bootstrap",
                 "hard_failure": current_eval.hard_failure,
                 "execution_status": current_eval.execution_status,
+                "error_type": current_eval.error_type,
+                "error_detail": current_eval.error_detail,
             },
         )
 
@@ -620,6 +622,8 @@ def run_single_agent_experiment(task_name: str, config: RunConfig, output_root: 
                     "mutation_mode": mutation_mode,
                     "hard_failure": candidate_eval.hard_failure,
                     "execution_status": candidate_eval.execution_status,
+                    "error_type": candidate_eval.error_type,
+                    "error_detail": candidate_eval.error_detail,
                 },
             )
 

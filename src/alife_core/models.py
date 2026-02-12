@@ -89,6 +89,8 @@ class EvaluationResult:
         "missing_function",
         "internal_error",
     ] = "ok"
+    error_type: str = ""
+    error_detail: str = ""
 
 
 @dataclass(frozen=True)

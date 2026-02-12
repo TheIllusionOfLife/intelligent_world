@@ -89,7 +89,7 @@ def _run_process_batch(
     function_name: str,
     cases: tuple[Case, ...],
     timeout_seconds: float,
-) -> tuple[str, list[tuple[str, object]] | None]:
+) -> tuple[str, list[tuple[str, object]] | None, str]:
     context = get_context("spawn")
     queue = context.Queue()
 
@@ -104,15 +104,16 @@ def _run_process_batch(
     if process.is_alive():
         process.terminate()
         process.join()
-        return "timeout", None
+        return "timeout", None, "execution exceeded timeout"
 
     try:
         status, payload = queue.get_nowait()
         if status == "ok":
-            return status, payload
-        return status, None
+            return status, payload, ""
+        detail = str(payload) if payload is not None else status
+        return status, None, detail
     except Empty:
-        return "compile_or_exec_error", None
+        return "compile_or_exec_error", None, "process exited without result"
 
 
 def _run_docker_batch(
@@ -120,7 +121,7 @@ def _run_docker_batch(
     function_name: str,
     cases: tuple[Case, ...],
     config: RunConfig,
-) -> tuple[str, list[tuple[str, object]] | None]:
+) -> tuple[str, list[tuple[str, object]] | None, str]:
     payload = _encode_payload(code=code, function_name=function_name, cases=cases)
     command = [
         "docker",
@@ -157,9 +158,9 @@ def _run_docker_batch(
             timeout=config.exec_timeout_seconds,
         )
     except subprocess.TimeoutExpired:
-        return "timeout", None
+        return "timeout", None, "docker execution exceeded timeout"
     except FileNotFoundError:
-        return "docker_unavailable", None
+        return "docker_unavailable", None, "docker binary not found"
 
     if completed.returncode != 0:
         raw = completed.stderr or b""
@@ -170,17 +171,18 @@ def _run_docker_batch(
             or "connection refused" in lower
             or "is the docker daemon running" in lower
         ):
-            return "docker_unavailable", None
-        return "compile_or_exec_error", None
+            return "docker_unavailable", None, stderr_text
+        return "compile_or_exec_error", None, stderr_text
 
     try:
         status, result_payload = pickle.loads(base64.b64decode(completed.stdout))
     except Exception:  # noqa: BLE001
-        return "compile_or_exec_error", None
+        return "compile_or_exec_error", None, "failed to decode runner output"
 
     if status == "ok":
-        return status, result_payload
-    return status, None
+        return status, result_payload, ""
+    detail = str(result_payload) if result_payload is not None else status
+    return status, None, detail
 
 
 _active_pool: DockerPool | None = None
@@ -200,7 +202,7 @@ def _execute_case_batch(
     function_name: str,
     cases: tuple[Case, ...],
     config: RunConfig,
-) -> tuple[str, list[tuple[str, object]] | None]:
+) -> tuple[str, list[tuple[str, object]] | None, str]:
     if config.sandbox_backend == "process":
         return _run_process_batch(
             code=code,
@@ -210,11 +212,12 @@ def _execute_case_batch(
         )
 
     if config.use_persistent_docker and _active_pool is not None:
-        return _active_pool.execute(
+        status, outputs = _active_pool.execute(
             code=code,
             function_name=function_name,
             cases=cases,
         )
+        return status, outputs, "" if status == "ok" else status
 
     return _run_docker_batch(
         code=code,
@@ -251,7 +254,7 @@ def evaluate_candidate(
     config: RunConfig,
 ) -> EvaluationResult:
     combined_cases = task.train_cases + task.hidden_cases
-    status, outputs = _execute_case_batch(
+    status, outputs, error_detail = _execute_case_batch(
         code=code,
         function_name=task.function_name,
         cases=combined_cases,
@@ -302,4 +305,6 @@ def evaluate_candidate(
         hidden_failures=hidden_failures,
         hard_failure=hard_failure,
         execution_status=execution_status,
+        error_type=execution_status if hard_failure else "",
+        error_detail=error_detail if hard_failure else "",
     )
