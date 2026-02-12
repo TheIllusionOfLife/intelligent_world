@@ -15,6 +15,31 @@ def _collect_with_visitor(tree: cst.Module, visitor: cst.CSTVisitor) -> None:
         tree.visit(visitor)
 
 
+class _ContinueFinder(cst.CSTVisitor):
+    """Detect continue statements in a loop body (not nested loops)."""
+
+    def __init__(self) -> None:
+        self.found = False
+
+    def visit_Continue(self, node: cst.Continue) -> None:
+        self.found = True
+
+    def visit_For(self, node: cst.For) -> bool:
+        return False  # Don't recurse into nested loops
+
+    def visit_While(self, node: cst.While) -> bool:
+        return False  # Don't recurse into nested loops
+
+
+def _body_contains_continue(node: cst.For) -> bool:
+    finder = _ContinueFinder()
+    try:
+        node.body.visit(finder)
+    except Exception:  # noqa: BLE001
+        return True  # Conservatively skip if we can't analyze
+    return finder.found
+
+
 def mutate_guard_insertion(source: str, rng: random.Random) -> str:
     """Insert an early-return guard clause at the start of a function body."""
     try:
@@ -116,7 +141,8 @@ def mutate_loop_conversion(source: str, rng: random.Random) -> str:
                 func = node.iter.func
                 if isinstance(func, cst.Name) and func.value == "range":
                     if len(node.iter.args) == 1 and isinstance(node.target, cst.Name):
-                        self.fors.append(node)
+                        if not _body_contains_continue(node):
+                            self.fors.append(node)
 
     finder = _ForFinder()
     _collect_with_visitor(tree, finder)

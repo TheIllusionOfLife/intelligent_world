@@ -914,12 +914,19 @@ def run_population_experiment(task_name: str, config: RunConfig, output_root: Pa
         recent_best_fitness: deque[float] = deque(maxlen=max(1, config.convergence_patience))
         seed_population = _initialize_population_for_task(task, config, rng, id_counter)
         population = _evaluate_population(seed_population, task, config, pool=pool)
+        initial_mean_depth = (
+            statistics.fmean([ast_max_depth(o.code) for o in population]) if population else 0.0
+        )
 
         unlocked = False
         for generation in range(config.max_generations + 1):
             best = max(population, key=lambda item: item.fitness)
             fitnesses = [item.fitness for item in population]
-            metrics = compute_generation_metrics(population, novelty_k=config.novelty_k)
+            metrics = compute_generation_metrics(
+                population,
+                novelty_k=config.novelty_k,
+                initial_mean_depth=initial_mean_depth,
+            )
             recent_diversity.append(metrics.structural_diversity_ratio)
             recent_best_fitness.append(best.fitness)
 

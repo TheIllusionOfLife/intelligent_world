@@ -107,13 +107,14 @@ class TestDockerPoolExecution:
             pool = DockerPool(config=default_config, pool_size=1)
             pool.start()
             try:
-                status, outputs = pool.execute(
+                status, outputs, detail = pool.execute(
                     code="def solve(x): return x + 1",
                     function_name="solve",
                     cases=(((1,), 2),),
                 )
                 assert status == "ok"
                 assert outputs == [("ok", 2)]
+                assert detail == ""
             finally:
                 mock_sub.run.side_effect = None
                 mock_sub.run.return_value = _OK_RESULT
@@ -130,7 +131,7 @@ class TestDockerPoolExecution:
             pool = DockerPool(config=default_config, pool_size=1)
             pool.start()
             try:
-                status, outputs = pool.execute(
+                status, outputs, _detail = pool.execute(
                     code="while True: pass",
                     function_name="solve",
                     cases=(((1,), 2),),
@@ -171,7 +172,7 @@ class TestDockerPoolRecovery:
             pool = DockerPool(config=default_config, pool_size=1)
             pool.start()
             try:
-                status, outputs = pool.execute(
+                status, outputs, _detail = pool.execute(
                     code="def solve(x): return x + 1",
                     function_name="solve",
                     cases=(((1,), 2),),

@@ -1,6 +1,7 @@
 """Persistent Docker container pool for faster evaluation via docker exec."""
 
 import base64
+import io
 import logging
 import pickle
 import subprocess
@@ -51,6 +52,47 @@ if __name__ == "__main__":
 """
 
 
+_SAFE_BUILTINS = {
+    "builtins": frozenset(
+        {
+            "range",
+            "int",
+            "float",
+            "str",
+            "bool",
+            "list",
+            "tuple",
+            "dict",
+            "set",
+            "frozenset",
+            "bytes",
+            "bytearray",
+            "complex",
+            "type",
+            "None",
+            "True",
+            "False",
+            "Ellipsis",
+        }
+    ),
+}
+
+
+class _RestrictedUnpickler(pickle.Unpickler):
+    """Unpickler that only allows safe builtin types."""
+
+    def find_class(self, module: str, name: str) -> type:
+        allowed = _SAFE_BUILTINS.get(module)
+        if allowed is not None and name in allowed:
+            return getattr(__import__(module), name)
+        raise pickle.UnpicklingError(f"Forbidden unpickle: {module}.{name}")
+
+
+def restricted_loads(data: bytes) -> object:
+    """Deserialize pickle data, allowing only safe builtin types."""
+    return _RestrictedUnpickler(io.BytesIO(data)).load()
+
+
 def _encode_payload(code: str, function_name: str, cases: tuple[Case, ...]) -> bytes:
     payload = {
         "code": code,
@@ -86,6 +128,10 @@ class DockerPool:
         self.start()
         return self
 
+    def __del__(self) -> None:
+        if self._containers:
+            self.stop()
+
     def __exit__(self, *_args: object) -> None:
         self.stop()
 
@@ -94,21 +140,31 @@ class DockerPool:
         code: str,
         function_name: str,
         cases: tuple[Case, ...],
-    ) -> tuple[str, list[tuple[str, object]] | None]:
+    ) -> tuple[str, list[tuple[str, object]] | None, str]:
         with self._lock:
             idx = self._round_robin % len(self._containers)
             self._round_robin += 1
             container_id = self._containers[idx]
 
-        status, result = self._exec_in_container(container_id, code, function_name, cases)
+        status, result, detail = self._exec_in_container(
+            container_id,
+            code,
+            function_name,
+            cases,
+        )
 
         if status not in ("ok", "timeout", "compile_or_exec_error", "missing_function"):
             LOGGER.warning("Container %s may be unhealthy, attempting recovery", container_id[:12])
             new_id = self._recover_container(idx, container_id)
             if new_id:
-                status, result = self._exec_in_container(new_id, code, function_name, cases)
+                status, result, detail = self._exec_in_container(
+                    new_id,
+                    code,
+                    function_name,
+                    cases,
+                )
 
-        return status, result
+        return status, result, detail
 
     def _create_container(self) -> str:
         command = [
@@ -146,13 +202,18 @@ class DockerPool:
                 f"Failed to create container: {completed.stderr.decode('utf-8', errors='replace')}"
             )
         container_id = completed.stdout.decode("utf-8").strip()
-        # Start the container
-        subprocess.run(
+        start_result = subprocess.run(
             ["docker", "start", container_id],
             capture_output=True,
             check=False,
             timeout=10,
         )
+        if start_result.returncode != 0:
+            self._remove_container(container_id)
+            raise RuntimeError(
+                f"Failed to start container: "
+                f"{start_result.stderr.decode('utf-8', errors='replace')}"
+            )
         return container_id
 
     def _remove_container(self, container_id: str) -> None:
@@ -169,7 +230,7 @@ class DockerPool:
         code: str,
         function_name: str,
         cases: tuple[Case, ...],
-    ) -> tuple[str, list[tuple[str, object]] | None]:
+    ) -> tuple[str, list[tuple[str, object]] | None, str]:
         payload = _encode_payload(code=code, function_name=function_name, cases=cases)
         command = [
             "docker",
@@ -189,19 +250,21 @@ class DockerPool:
                 timeout=self._config.exec_timeout_seconds,
             )
         except subprocess.TimeoutExpired:
-            return "timeout", None
+            return "timeout", None, "docker exec exceeded timeout"
 
         if completed.returncode != 0:
-            return "container_error", None
+            stderr = completed.stderr.decode("utf-8", errors="replace") if completed.stderr else ""
+            return "container_error", None, stderr
 
         try:
-            status, result_payload = pickle.loads(base64.b64decode(completed.stdout))
+            status, result_payload = restricted_loads(base64.b64decode(completed.stdout))
         except Exception:  # noqa: BLE001
-            return "compile_or_exec_error", None
+            return "compile_or_exec_error", None, "failed to decode runner output"
 
         if status == "ok":
-            return status, result_payload
-        return status, None
+            return status, result_payload, ""
+        detail = str(result_payload) if result_payload is not None else status
+        return status, None, detail
 
     def _is_container_healthy(self, container_id: str) -> bool:
         completed = subprocess.run(

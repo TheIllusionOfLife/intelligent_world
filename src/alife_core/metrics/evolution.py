@@ -180,6 +180,7 @@ class EvolutionMetrics:
 def compute_generation_metrics(
     population: list[OrganismState],
     novelty_k: int = 3,
+    initial_mean_depth: float = 0.0,
 ) -> EvolutionMetrics:
     if not population:
         return EvolutionMetrics(
@@ -265,6 +266,8 @@ def compute_generation_metrics(
     codes = [organism.code for organism in population]
 
     kc_proxy = kolmogorov_complexity_proxy(codes)
+    mean_depth = statistics.fmean(ast_depths) if ast_depths else 0.0
+    complexity_delta = cumulative_complexity_delta(mean_depth, initial_mean_depth)
     mean_zipf = (
         statistics.fmean([code_token_zipf_coefficient(code) for code in codes]) if codes else 0.0
     )
@@ -282,5 +285,6 @@ def compute_generation_metrics(
         max_lineage_depth=max(lineage_depths) if lineage_depths else 0,
         mean_lineage_depth=statistics.fmean(lineage_depths) if lineage_depths else 0.0,
         kolmogorov_complexity_proxy=kc_proxy,
+        cumulative_complexity_delta=complexity_delta,
         code_token_zipf_coefficient=mean_zipf,
     )

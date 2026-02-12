@@ -4,7 +4,7 @@ import subprocess
 from multiprocessing import get_context
 from queue import Empty
 
-from alife_core.evaluator.docker_pool import DockerPool
+from alife_core.evaluator.docker_pool import DockerPool, restricted_loads
 from alife_core.models import Case, EvaluationResult, RunConfig, TaskSpec
 
 _RUNNER_SCRIPT = r"""
@@ -175,7 +175,7 @@ def _run_docker_batch(
         return "compile_or_exec_error", None, stderr_text
 
     try:
-        status, result_payload = pickle.loads(base64.b64decode(completed.stdout))
+        status, result_payload = restricted_loads(base64.b64decode(completed.stdout))
     except Exception:  # noqa: BLE001
         return "compile_or_exec_error", None, "failed to decode runner output"
 
@@ -201,12 +201,11 @@ def _execute_case_batch(
         )
 
     if config.use_persistent_docker and pool is not None:
-        status, outputs = pool.execute(
+        return pool.execute(
             code=code,
             function_name=function_name,
             cases=cases,
         )
-        return status, outputs, "" if status == "ok" else status
 
     return _run_docker_batch(
         code=code,

@@ -55,7 +55,8 @@ def mutate_with_llm(
     """
     _ = rng  # Reserved for future stochastic prompt variation
 
-    prompt = _MUTATION_PROMPT_TEMPLATE.format(source=source)
+    escaped_source = source.replace("```", "` ` `")
+    prompt = _MUTATION_PROMPT_TEMPLATE.format(source=escaped_source)
 
     try:
         completed = subprocess.run(
