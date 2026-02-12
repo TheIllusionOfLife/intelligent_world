@@ -87,7 +87,7 @@ def test_top_level_infinite_loop_times_out_instead_of_hanging() -> None:
 def test_evaluator_batches_case_execution(monkeypatch) -> None:
     calls: list[tuple[tuple[tuple, object], ...]] = []
 
-    def fake_execute_batch(code, function_name, cases, config):
+    def fake_execute_batch(code, function_name, cases, config, pool=None):
         _ = code
         _ = function_name
         _ = config

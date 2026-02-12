@@ -22,6 +22,7 @@ from alife_core.agent.curriculum import should_unlock_next_task
 from alife_core.agent.lifecycle import AgentState, apply_step_outcome
 from alife_core.bootstrap import BootstrapError, generate_seed, static_seed
 from alife_core.evaluator.core import evaluate_candidate
+from alife_core.evaluator.docker_pool import DockerPool
 from alife_core.logging.events import write_event, write_run_start
 from alife_core.metrics.evolution import (
     ast_max_depth,
@@ -417,6 +418,10 @@ def run_single_agent_experiment(task_name: str, config: RunConfig, output_root: 
     state: AgentState | None = None
     current_task_index = task_names.index(task_name)
     llm_budget_remaining = config.llm_mutation_budget
+    pool: DockerPool | None = None
+    if config.use_persistent_docker and config.sandbox_backend == "docker":
+        pool = DockerPool(config)
+        pool.start()
     while current_task_index < len(task_names):
         task = tasks[task_names[current_task_index]]
         mutation_outcomes: deque[tuple[bool, bool]] = deque(maxlen=max(1, config.viability_window))
@@ -455,7 +460,13 @@ def run_single_agent_experiment(task_name: str, config: RunConfig, output_root: 
         if not validation.is_valid:
             raise RuntimeError(f"Bootstrap failed validation for {task.name}: {validation.reason}")
 
-        current_eval = evaluate_candidate(current_code, task=task, edit_cost=0.0, config=config)
+        current_eval = evaluate_candidate(
+            current_code,
+            task=task,
+            edit_cost=0.0,
+            config=config,
+            pool=pool,
+        )
         if state is None:
             state = AgentState(
                 energy=config.initial_energy,
@@ -600,6 +611,7 @@ def run_single_agent_experiment(task_name: str, config: RunConfig, output_root: 
                 task=task,
                 edit_cost=edit_cost,
                 config=step_config,
+                pool=pool,
             )
 
             previous_fitness = current_eval.fitness
@@ -700,6 +712,8 @@ def run_single_agent_experiment(task_name: str, config: RunConfig, output_root: 
         step=0,
         payload={"completed_tasks": completed_tasks},
     )
+    if pool is not None:
+        pool.stop()
     return RunSummary(run_id=run_id, log_path=log_path, completed_tasks=completed_tasks)
 
 
@@ -751,6 +765,7 @@ def _evaluate_population(
     organisms: list[OrganismState] | list[str],
     task: TaskSpec,
     config: RunConfig,
+    pool: DockerPool | None = None,
 ) -> list[OrganismState]:
     normalized: list[OrganismState] = []
     if organisms and isinstance(organisms[0], str):
@@ -772,7 +787,13 @@ def _evaluate_population(
         normalized = list(organisms)  # type: ignore[arg-type]
 
     def _evaluate_one(organism: OrganismState) -> OrganismState:
-        result = evaluate_candidate(organism.code, task=task, edit_cost=0.0, config=config)
+        result = evaluate_candidate(
+            organism.code,
+            task=task,
+            edit_cost=0.0,
+            config=config,
+            pool=pool,
+        )
         return OrganismState(
             code=organism.code,
             fitness=result.fitness,
@@ -882,13 +903,17 @@ def run_population_experiment(task_name: str, config: RunConfig, output_root: Pa
     current_task_names = list(tasks)
     current_task_index = current_task_names.index(task_name)
     id_counter = [0]
+    pool: DockerPool | None = None
+    if config.use_persistent_docker and config.sandbox_backend == "docker":
+        pool = DockerPool(config)
+        pool.start()
 
     while current_task_index < len(current_task_names):
         task = tasks[current_task_names[current_task_index]]
         recent_diversity: deque[float] = deque(maxlen=max(1, config.diversity_window))
         recent_best_fitness: deque[float] = deque(maxlen=max(1, config.convergence_patience))
         seed_population = _initialize_population_for_task(task, config, rng, id_counter)
-        population = _evaluate_population(seed_population, task, config)
+        population = _evaluate_population(seed_population, task, config, pool=pool)
 
         unlocked = False
         for generation in range(config.max_generations + 1):
@@ -1068,7 +1093,7 @@ def run_population_experiment(task_name: str, config: RunConfig, output_root: Pa
                     )
                 )
 
-            population = _evaluate_population(next_organisms, task, config)
+            population = _evaluate_population(next_organisms, task, config, pool=pool)
 
         if not unlocked or not config.run_curriculum:
             break
@@ -1084,6 +1109,8 @@ def run_population_experiment(task_name: str, config: RunConfig, output_root: Pa
         step=0,
         payload={"completed_tasks": completed_tasks},
     )
+    if pool is not None:
+        pool.stop()
     return RunSummary(run_id=run_id, log_path=log_path, completed_tasks=completed_tasks)
 
 

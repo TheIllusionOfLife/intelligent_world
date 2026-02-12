@@ -185,23 +185,12 @@ def _run_docker_batch(
     return status, None, detail
 
 
-_active_pool: DockerPool | None = None
-
-
-def get_docker_pool() -> DockerPool | None:
-    return _active_pool
-
-
-def set_docker_pool(pool: DockerPool | None) -> None:
-    global _active_pool  # noqa: PLW0603
-    _active_pool = pool
-
-
 def _execute_case_batch(
     code: str,
     function_name: str,
     cases: tuple[Case, ...],
     config: RunConfig,
+    pool: DockerPool | None = None,
 ) -> tuple[str, list[tuple[str, object]] | None, str]:
     if config.sandbox_backend == "process":
         return _run_process_batch(
@@ -211,8 +200,8 @@ def _execute_case_batch(
             timeout_seconds=config.exec_timeout_seconds,
         )
 
-    if config.use_persistent_docker and _active_pool is not None:
-        status, outputs = _active_pool.execute(
+    if config.use_persistent_docker and pool is not None:
+        status, outputs = pool.execute(
             code=code,
             function_name=function_name,
             cases=cases,
@@ -252,6 +241,7 @@ def evaluate_candidate(
     task: TaskSpec,
     edit_cost: float,
     config: RunConfig,
+    pool: DockerPool | None = None,
 ) -> EvaluationResult:
     combined_cases = task.train_cases + task.hidden_cases
     status, outputs, error_detail = _execute_case_batch(
@@ -259,6 +249,7 @@ def evaluate_candidate(
         function_name=task.function_name,
         cases=combined_cases,
         config=config,
+        pool=pool,
     )
 
     train_count = len(task.train_cases)
