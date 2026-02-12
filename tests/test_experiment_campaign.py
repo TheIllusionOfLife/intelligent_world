@@ -1,13 +1,9 @@
 import json
-from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-import pytest
-
 from scripts.experiment_campaign import (
-    CONFIGS,
     DEFAULT_SEEDS,
     DEFAULT_TASKS,
     build_run_configs,
@@ -122,9 +118,7 @@ class TestExtractRunMetrics:
                 "payload": {"completed_tasks": ["two_sum_sorted"]},
             },
         ]
-        log_path.write_text(
-            "\n".join(json.dumps(e) for e in events), encoding="utf-8"
-        )
+        log_path.write_text("\n".join(json.dumps(e) for e in events), encoding="utf-8")
 
         metrics = extract_run_metrics(log_path, mode="single_agent")
         assert metrics["best_fitness"] == 0.8
@@ -163,9 +157,7 @@ class TestExtractRunMetrics:
                 "payload": {"completed_tasks": ["two_sum_sorted"]},
             },
         ]
-        log_path.write_text(
-            "\n".join(json.dumps(e) for e in events), encoding="utf-8"
-        )
+        log_path.write_text("\n".join(json.dumps(e) for e in events), encoding="utf-8")
 
         metrics = extract_run_metrics(log_path, mode="population")
         assert metrics["best_fitness"] == 0.75
@@ -197,9 +189,7 @@ class TestExtractRunMetrics:
                 "payload": {"completed_tasks": []},
             },
         ]
-        log_path.write_text(
-            "\n".join(json.dumps(e) for e in events), encoding="utf-8"
-        )
+        log_path.write_text("\n".join(json.dumps(e) for e in events), encoding="utf-8")
 
         metrics = extract_run_metrics(log_path, mode="population")
         assert metrics["convergence_reason"] == "low_diversity"
@@ -236,18 +226,14 @@ class TestRunCampaign:
                     "payload": {"completed_tasks": []},
                 },
             ]
-            log_path.write_text(
-                "\n".join(json.dumps(e) for e in events), encoding="utf-8"
-            )
+            log_path.write_text("\n".join(json.dumps(e) for e in events), encoding="utf-8")
             return SimpleNamespace(
                 run_id=f"run-{call_count['n']}",
                 log_path=log_path,
                 completed_tasks=[],
             )
 
-        with patch(
-            "scripts.experiment_campaign.run_experiment", fake_run_experiment
-        ):
+        with patch("scripts.experiment_campaign.run_experiment", fake_run_experiment):
             results = run_campaign(
                 output_dir=tmp_path,
                 seeds=[0],
@@ -291,9 +277,7 @@ class TestRunCampaign:
                     "payload": {"completed_tasks": []},
                 },
             ]
-            log_path.write_text(
-                "\n".join(json.dumps(e) for e in events), encoding="utf-8"
-            )
+            log_path.write_text("\n".join(json.dumps(e) for e in events), encoding="utf-8")
             return SimpleNamespace(
                 run_id=f"run-{call_count['n']}",
                 log_path=log_path,
@@ -301,9 +285,7 @@ class TestRunCampaign:
             )
 
         output_dir = tmp_path
-        with patch(
-            "scripts.experiment_campaign.run_experiment", failing_run_experiment
-        ):
+        with patch("scripts.experiment_campaign.run_experiment", failing_run_experiment):
             results = run_campaign(
                 output_dir=output_dir,
                 seeds=[0],

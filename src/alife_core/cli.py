@@ -59,6 +59,29 @@ def run_metrics_report_spike(log_path: str) -> dict[str, object]:
     return module.summarize_metrics(log_path)
 
 
+def run_experiment_campaign_spike(
+    output_dir: str = "campaign_results",
+    allow_unsafe_process_backend: bool = False,
+) -> list[dict]:
+    module = _load_script_module("scripts/experiment_campaign.py")
+    backend = "process" if allow_unsafe_process_backend else "docker"
+    return module.run_campaign(
+        output_dir=Path(output_dir),
+        sandbox_backend=backend,
+    )
+
+
+def run_analyze_campaign_spike(
+    results_dir: str = "campaign_results",
+    output: str = "docs/experiment_campaign_report.md",
+) -> dict:
+    module = _load_script_module("scripts/analyze_campaign.py")
+    return module.analyze_campaign(
+        results_dir=Path(results_dir),
+        output_path=Path(output),
+    )
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="alife")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -97,6 +120,12 @@ def build_parser() -> argparse.ArgumentParser:
     viability_parser.add_argument("--seed", type=int, default=0)
     metrics_parser = spike_subparsers.add_parser("metrics-report")
     metrics_parser.add_argument("--log-path", required=True)
+    campaign_parser = spike_subparsers.add_parser("experiment-campaign")
+    campaign_parser.add_argument("--output-dir", default="campaign_results")
+    campaign_parser.add_argument("--unsafe-process-backend", action="store_true")
+    analyze_parser = spike_subparsers.add_parser("analyze-campaign")
+    analyze_parser.add_argument("--results-dir", default="campaign_results")
+    analyze_parser.add_argument("--output", default="docs/experiment_campaign_report.md")
 
     return parser
 
@@ -171,6 +200,22 @@ def _dispatch(args: argparse.Namespace) -> int:
 
     if args.spike_command == "metrics-report":
         print(json.dumps(run_metrics_report_spike(log_path=args.log_path), sort_keys=True))
+        return 0
+
+    if args.spike_command == "experiment-campaign":
+        results = run_experiment_campaign_spike(
+            output_dir=args.output_dir,
+            allow_unsafe_process_backend=args.unsafe_process_backend,
+        )
+        print(json.dumps({"total_runs": len(results)}, sort_keys=True))
+        return 0
+
+    if args.spike_command == "analyze-campaign":
+        analysis = run_analyze_campaign_spike(
+            results_dir=args.results_dir,
+            output=args.output,
+        )
+        print(json.dumps({"success_rates": analysis["success_rates"]}, sort_keys=True))
         return 0
 
     return 1
