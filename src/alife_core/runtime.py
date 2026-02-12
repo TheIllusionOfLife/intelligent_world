@@ -245,8 +245,7 @@ def _mutate_boolop(tree: ast.AST, rng: random.Random) -> bool:
     candidates = [
         node
         for node in ast.walk(tree)
-        if isinstance(node, ast.BoolOp)
-        and isinstance(node.op, (ast.And, ast.Or))
+        if isinstance(node, ast.BoolOp) and isinstance(node.op, (ast.And, ast.Or))
     ]
     if not candidates:
         return False

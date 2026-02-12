@@ -702,8 +702,10 @@ def test_mutate_constant_distributes_across_all_constants() -> None:
         if changed:
             rendered = ast.unparse(tree)
             for original_val in (1, 2, 3):
-                original_str = f"a = {original_val}" if original_val == 1 else (
-                    f"b = {original_val}" if original_val == 2 else f"c = {original_val}"
+                original_str = (
+                    f"a = {original_val}"
+                    if original_val == 1
+                    else (f"b = {original_val}" if original_val == 2 else f"c = {original_val}")
                 )
                 if original_str not in rendered:
                     hit_counts[original_val] += 1

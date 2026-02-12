@@ -162,11 +162,7 @@ def _run_docker_batch(
 
     if completed.returncode != 0:
         raw = completed.stderr or b""
-        stderr_text = (
-            raw.decode("utf-8", errors="replace")
-            if isinstance(raw, bytes)
-            else raw
-        )
+        stderr_text = raw.decode("utf-8", errors="replace") if isinstance(raw, bytes) else raw
         lower = stderr_text.lower()
         if (
             "cannot connect" in lower

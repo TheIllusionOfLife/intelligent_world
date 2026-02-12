@@ -37,9 +37,7 @@ def _measure_task(
     tasks = load_builtin_tasks()
     task = tasks[task_name]
     base_code = _bootstrap_code(task_name)
-    base_eval = evaluate_candidate(
-        base_code, task=task, edit_cost=0.0, config=_PROCESS_CONFIG
-    )
+    base_eval = evaluate_candidate(base_code, task=task, edit_cost=0.0, config=_PROCESS_CONFIG)
 
     valid_count = 0
     improved_count = 0
@@ -73,9 +71,7 @@ def _measure_task(
             validation = validate_candidate(code)
             if not validation.is_valid:
                 break
-            chain_eval = evaluate_candidate(
-                code, task=task, edit_cost=0.0, config=_PROCESS_CONFIG
-            )
+            chain_eval = evaluate_candidate(code, task=task, edit_cost=0.0, config=_PROCESS_CONFIG)
             if chain_eval.train_pass_ratio == 0:
                 break
             survived += 1
