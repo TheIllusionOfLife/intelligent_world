@@ -687,6 +687,104 @@ def test_step_event_includes_execution_status(tmp_path: Path) -> None:
         assert "hard_failure" in event["payload"]
 
 
+def test_mutate_constant_distributes_across_all_constants() -> None:
+    import ast
+
+    from alife_core import runtime
+
+    source = "def solve(x):\n    a = 1\n    b = 2\n    c = 3\n    return a + b + c\n"
+    hit_counts = {1: 0, 2: 0, 3: 0}
+
+    for seed in range(100):
+        rng = __import__("random").Random(seed)
+        tree = ast.parse(source)
+        changed = runtime._mutate_constant(tree, rng)
+        if changed:
+            rendered = ast.unparse(tree)
+            for original_val in (1, 2, 3):
+                original_str = f"a = {original_val}" if original_val == 1 else (
+                    f"b = {original_val}" if original_val == 2 else f"c = {original_val}"
+                )
+                if original_str not in rendered:
+                    hit_counts[original_val] += 1
+
+    for val, count in hit_counts.items():
+        assert count >= 10, f"constant {val} was mutated only {count}/100 times"
+
+
+def test_mutate_binop_distributes_across_all_add_ops() -> None:
+    import ast
+
+    from alife_core import runtime
+
+    source = "def solve(x, y, z):\n    return (x + y) + z\n"
+    # Track which Add node got mutated by checking structure
+    first_changed = 0
+    second_changed = 0
+
+    for seed in range(100):
+        rng = __import__("random").Random(seed)
+        tree = ast.parse(source)
+        changed = runtime._mutate_binop(tree, rng)
+        if changed:
+            rendered = ast.unparse(tree)
+            # If outer Add changed, inner x + y remains
+            # If inner Add changed, outer + z remains but inner uses different op
+            inner_tree = ast.parse(rendered)
+            func_body = inner_tree.body[0].body[0].value  # type: ignore[attr-defined]
+            if isinstance(func_body, ast.BinOp):
+                if not isinstance(func_body.op, ast.Add):
+                    second_changed += 1
+                elif isinstance(func_body.left, ast.BinOp) and not isinstance(
+                    func_body.left.op, ast.Add
+                ):
+                    first_changed += 1
+
+    assert first_changed >= 10, f"inner Add mutated only {first_changed}/100 times"
+    assert second_changed >= 10, f"outer Add mutated only {second_changed}/100 times"
+
+
+def test_mutate_compare_distributes_across_comparisons() -> None:
+    import ast
+
+    from alife_core import runtime
+
+    source = (
+        "def solve(x, y):\n"
+        "    if x < y:\n"
+        "        return x\n"
+        "    if x > y:\n"
+        "        return y\n"
+        "    return 0\n"
+    )
+    first_changed = 0
+    second_changed = 0
+
+    for seed in range(100):
+        rng = __import__("random").Random(seed)
+        tree = ast.parse(source)
+        changed = runtime._mutate_compare(tree, rng)
+        if changed:
+            rendered = ast.unparse(tree)
+            if "x < y" not in rendered and "x > y" in rendered:
+                first_changed += 1
+            elif "x > y" not in rendered and "x < y" in rendered:
+                second_changed += 1
+
+    assert first_changed >= 10, f"first Compare mutated only {first_changed}/100 times"
+    assert second_changed >= 10, f"second Compare mutated only {second_changed}/100 times"
+
+
+def test_mutate_constant_returns_false_when_no_constants() -> None:
+    import ast
+
+    from alife_core import runtime
+
+    tree = ast.parse("def solve(x):\n    return x\n")
+    rng = __import__("random").Random(0)
+    assert runtime._mutate_constant(tree, rng) is False
+
+
 def test_evaluate_population_skips_pre_evaluated_organisms(monkeypatch) -> None:
     from alife_core import runtime
     from alife_core.models import EvaluationResult, OrganismState

@@ -189,72 +189,83 @@ def _initialize_run(
 
 
 def _mutate_statement_swap(tree: ast.AST, rng: random.Random) -> bool:
-    for node in ast.walk(tree):
-        if (
-            hasattr(node, "body")
-            and isinstance(node.body, list)
-            and len(node.body) >= 2
-            and all(isinstance(item, ast.stmt) for item in node.body)
-            and rng.random() < 0.2
-        ):
-            left = rng.choice(range(0, len(node.body) - 1))
-            node.body[left], node.body[left + 1] = node.body[left + 1], node.body[left]
-            return True
-    return False
+    candidates = [
+        node
+        for node in ast.walk(tree)
+        if hasattr(node, "body")
+        and isinstance(node.body, list)
+        and len(node.body) >= 2
+        and all(isinstance(item, ast.stmt) for item in node.body)
+    ]
+    if not candidates:
+        return False
+    target = rng.choice(candidates)
+    left = rng.choice(range(0, len(target.body) - 1))
+    target.body[left], target.body[left + 1] = target.body[left + 1], target.body[left]
+    return True
 
 
 def _mutate_binop(tree: ast.AST, rng: random.Random) -> bool:
-    for node in ast.walk(tree):
-        if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add) and rng.random() < 0.4:
-            node.op = ast.Sub() if rng.random() < 0.5 else ast.Mult()
-            return True
-    return False
+    candidates = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add)
+    ]
+    if not candidates:
+        return False
+    target = rng.choice(candidates)
+    target.op = ast.Sub() if rng.random() < 0.5 else ast.Mult()
+    return True
 
 
 def _mutate_compare(tree: ast.AST, rng: random.Random) -> bool:
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Compare) and len(node.ops) == 1 and rng.random() < 0.5:
-            op = node.ops[0]
-            if isinstance(op, ast.Lt):
-                node.ops[0] = ast.Gt()
-            elif isinstance(op, ast.Gt):
-                node.ops[0] = ast.Lt()
-            elif isinstance(op, ast.LtE):
-                node.ops[0] = ast.GtE()
-            elif isinstance(op, ast.GtE):
-                node.ops[0] = ast.LtE()
-            elif isinstance(op, ast.Eq):
-                node.ops[0] = ast.NotEq()
-            elif isinstance(op, ast.NotEq):
-                node.ops[0] = ast.Eq()
-            else:
-                continue
-            return True
-    return False
+    _COMPARE_SWAP: dict[type, type] = {
+        ast.Lt: ast.Gt,
+        ast.Gt: ast.Lt,
+        ast.LtE: ast.GtE,
+        ast.GtE: ast.LtE,
+        ast.Eq: ast.NotEq,
+        ast.NotEq: ast.Eq,
+    }
+    candidates = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Compare)
+        and len(node.ops) == 1
+        and type(node.ops[0]) in _COMPARE_SWAP
+    ]
+    if not candidates:
+        return False
+    target = rng.choice(candidates)
+    target.ops[0] = _COMPARE_SWAP[type(target.ops[0])]()
+    return True
 
 
 def _mutate_boolop(tree: ast.AST, rng: random.Random) -> bool:
-    for node in ast.walk(tree):
-        if isinstance(node, ast.BoolOp) and rng.random() < 0.4:
-            if isinstance(node.op, ast.And):
-                node.op = ast.Or()
-                return True
-            if isinstance(node.op, ast.Or):
-                node.op = ast.And()
-                return True
-    return False
+    candidates = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.BoolOp)
+        and isinstance(node.op, (ast.And, ast.Or))
+    ]
+    if not candidates:
+        return False
+    target = rng.choice(candidates)
+    target.op = ast.Or() if isinstance(target.op, ast.And) else ast.And()
+    return True
 
 
 def _mutate_constant(tree: ast.AST, rng: random.Random) -> bool:
-    for node in ast.walk(tree):
-        if (
-            isinstance(node, ast.Constant)
-            and isinstance(node.value, (int, float))
-            and rng.random() < 0.6
-        ):
-            node.value = node.value + rng.choice([-2, -1, 1, 2])
-            return True
-    return False
+    candidates = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Constant) and isinstance(node.value, (int, float))
+    ]
+    if not candidates:
+        return False
+    target = rng.choice(candidates)
+    target.value = target.value + rng.choice([-2, -1, 1, 2])
+    return True
 
 
 _MUTATORS = {
@@ -276,7 +287,7 @@ def _mutate_code(
     order = (
         ["statement_swap", "compare", "boolop", "binop", "constant"]
         if prefer_structural
-        else ["binop", "constant", "compare", "boolop", "statement_swap"]
+        else ["compare", "boolop", "binop", "statement_swap", "constant"]
     )
     for _ in range(intensity):
         chosen = rng.choice(order)
