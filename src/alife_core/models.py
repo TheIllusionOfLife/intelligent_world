@@ -61,6 +61,7 @@ class RunConfig:
     convergence_fitness_delta_floor: float = 0.005
 
     use_persistent_docker: bool = False
+    enable_semantic_mutation: bool = False
 
 
 @dataclass(frozen=True)

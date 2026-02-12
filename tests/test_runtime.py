@@ -565,7 +565,7 @@ def test_population_mode_checks_final_generation_candidate(monkeypatch, tmp_path
     monkeypatch.setattr(
         runtime,
         "_mutate_code",
-        lambda code, rng, intensity=1, prefer_structural=False: code,
+        lambda code, rng, intensity=1, prefer_structural=False, enable_semantic=False: code,
     )
 
     config = RunConfig(

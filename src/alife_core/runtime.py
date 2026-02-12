@@ -280,12 +280,36 @@ _MUTATORS = {
 }
 
 
+_SEMANTIC_MUTATORS: list[str] = ["guard_insertion", "loop_conversion", "variable_extraction"]
+
+
 def _mutate_code(
     current: str,
     rng: random.Random,
     intensity: int = 1,
     prefer_structural: bool = False,
+    enable_semantic: bool = False,
 ) -> str:
+    # Try semantic mutation first if enabled (30% chance per intensity round)
+    if enable_semantic:
+        from alife_core.mutation.semantic import (
+            mutate_guard_insertion,
+            mutate_loop_conversion,
+            mutate_variable_extraction,
+        )
+
+        _semantic_dispatch = {
+            "guard_insertion": mutate_guard_insertion,
+            "loop_conversion": mutate_loop_conversion,
+            "variable_extraction": mutate_variable_extraction,
+        }
+        for _ in range(intensity):
+            if rng.random() < 0.3:
+                op_name = rng.choice(_SEMANTIC_MUTATORS)
+                result = _semantic_dispatch[op_name](current, rng)
+                if result != current:
+                    return result
+
     tree = ast.parse(current)
     order = (
         ["statement_swap", "compare", "boolop", "binop", "constant"]
@@ -496,6 +520,7 @@ def run_single_agent_experiment(task_name: str, config: RunConfig, output_root: 
                 rng,
                 intensity=mutation_size,
                 prefer_structural=mutation_fallback_active,
+                enable_semantic=config.enable_semantic_mutation,
             )
             validation = validate_candidate(candidate_code)
 
@@ -783,7 +808,12 @@ def _initialize_population_for_task(
         if attempts > config.population_size * 20:
             population_codes.append(bootstrap_code)
             continue
-        candidate = _mutate_code(bootstrap_code, rng, intensity=1)
+        candidate = _mutate_code(
+            bootstrap_code,
+            rng,
+            intensity=1,
+            enable_semantic=config.enable_semantic_mutation,
+        )
         if validate_candidate(candidate).is_valid:
             population_codes.append(candidate)
     organisms: list[OrganismState] = []
@@ -985,7 +1015,12 @@ def run_population_experiment(task_name: str, config: RunConfig, output_root: Pa
                         payload={"generation": generation, "parent_ids": parent_ids},
                     )
                 if rng.random() < config.mutation_rate:
-                    child_code = _mutate_code(child_code, rng, intensity=1)
+                    child_code = _mutate_code(
+                        child_code,
+                        rng,
+                        intensity=1,
+                        enable_semantic=config.enable_semantic_mutation,
+                    )
 
                 validation = validate_candidate(child_code)
                 if not validation.is_valid:
