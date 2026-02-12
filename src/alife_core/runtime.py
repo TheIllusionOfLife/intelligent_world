@@ -22,6 +22,7 @@ from alife_core.agent.curriculum import should_unlock_next_task
 from alife_core.agent.lifecycle import AgentState, apply_step_outcome
 from alife_core.bootstrap import BootstrapError, generate_seed, static_seed
 from alife_core.evaluator.core import evaluate_candidate
+from alife_core.evaluator.docker_pool import DockerPool
 from alife_core.logging.events import write_event, write_run_start
 from alife_core.metrics.evolution import (
     ast_max_depth,
@@ -280,12 +281,52 @@ _MUTATORS = {
 }
 
 
+_SEMANTIC_MUTATORS: list[str] = ["guard_insertion", "loop_conversion", "variable_extraction"]
+
+
 def _mutate_code(
     current: str,
     rng: random.Random,
     intensity: int = 1,
     prefer_structural: bool = False,
-) -> str:
+    enable_semantic: bool = False,
+    enable_llm: bool = False,
+    llm_mutation_rate: float = 0.05,
+    llm_budget_remaining: int = 0,
+    llm_model: str = "",
+    llm_timeout: float = 20.0,
+) -> tuple[str, int]:
+    """Mutate code and return (mutated_code, llm_calls_consumed)."""
+    # Try LLM mutation first if enabled, budget available, and RNG selects it
+    llm_calls = 0
+    if enable_llm and llm_budget_remaining > 0 and rng.random() < llm_mutation_rate:
+        from alife_core.mutation.llm import mutate_with_llm
+
+        llm_calls = 1
+        result = mutate_with_llm(current, rng, model=llm_model, timeout=llm_timeout)
+        if result is not None:
+            return result, llm_calls
+
+    # Try semantic mutation if enabled (30% chance per intensity round)
+    if enable_semantic:
+        from alife_core.mutation.semantic import (
+            mutate_guard_insertion,
+            mutate_loop_conversion,
+            mutate_variable_extraction,
+        )
+
+        _semantic_dispatch = {
+            "guard_insertion": mutate_guard_insertion,
+            "loop_conversion": mutate_loop_conversion,
+            "variable_extraction": mutate_variable_extraction,
+        }
+        for _ in range(intensity):
+            if rng.random() < 0.3:
+                op_name = rng.choice(_SEMANTIC_MUTATORS)
+                result = _semantic_dispatch[op_name](current, rng)
+                if result != current:
+                    return result, llm_calls
+
     tree = ast.parse(current)
     order = (
         ["statement_swap", "compare", "boolop", "binop", "constant"]
@@ -299,7 +340,7 @@ def _mutate_code(
         for mutator_name in probe_order:
             if _MUTATORS[mutator_name](tree, rng):
                 break
-    return ast.unparse(tree) + "\n"
+    return ast.unparse(tree) + "\n", llm_calls
 
 
 def _resolve_docker_digest(config: RunConfig) -> str:
@@ -376,6 +417,11 @@ def run_single_agent_experiment(task_name: str, config: RunConfig, output_root: 
     completed_tasks: list[str] = []
     state: AgentState | None = None
     current_task_index = task_names.index(task_name)
+    llm_budget_remaining = config.llm_mutation_budget
+    pool: DockerPool | None = None
+    if config.use_persistent_docker and config.sandbox_backend == "docker":
+        pool = DockerPool(config)
+        pool.start()
     while current_task_index < len(task_names):
         task = tasks[task_names[current_task_index]]
         mutation_outcomes: deque[tuple[bool, bool]] = deque(maxlen=max(1, config.viability_window))
@@ -414,7 +460,13 @@ def run_single_agent_experiment(task_name: str, config: RunConfig, output_root: 
         if not validation.is_valid:
             raise RuntimeError(f"Bootstrap failed validation for {task.name}: {validation.reason}")
 
-        current_eval = evaluate_candidate(current_code, task=task, edit_cost=0.0, config=config)
+        current_eval = evaluate_candidate(
+            current_code,
+            task=task,
+            edit_cost=0.0,
+            config=config,
+            pool=pool,
+        )
         if state is None:
             state = AgentState(
                 energy=config.initial_energy,
@@ -470,6 +522,8 @@ def run_single_agent_experiment(task_name: str, config: RunConfig, output_root: 
                 "mutation_mode": "bootstrap",
                 "hard_failure": current_eval.hard_failure,
                 "execution_status": current_eval.execution_status,
+                "error_type": current_eval.error_type,
+                "error_detail": current_eval.error_detail,
             },
         )
 
@@ -489,12 +543,21 @@ def run_single_agent_experiment(task_name: str, config: RunConfig, output_root: 
             if mutation_fallback_active:
                 mutation_size += 1
                 mutation_mode = "fallback_template"
-            candidate_code = _mutate_code(
+            candidate_code, llm_used = _mutate_code(
                 current_code,
                 rng,
                 intensity=mutation_size,
                 prefer_structural=mutation_fallback_active,
+                enable_semantic=config.enable_semantic_mutation,
+                enable_llm=config.llm_mutation_rate > 0,
+                llm_mutation_rate=config.llm_mutation_rate,
+                llm_budget_remaining=llm_budget_remaining,
+                llm_model=config.ollama_model,
+                llm_timeout=config.bootstrap_timeout_seconds,
             )
+            llm_budget_remaining -= llm_used
+            if llm_used > 0:
+                mutation_mode = "llm"
             validation = validate_candidate(candidate_code)
 
             if not validation.is_valid:
@@ -548,6 +611,7 @@ def run_single_agent_experiment(task_name: str, config: RunConfig, output_root: 
                 task=task,
                 edit_cost=edit_cost,
                 config=step_config,
+                pool=pool,
             )
 
             previous_fitness = current_eval.fitness
@@ -618,8 +682,11 @@ def run_single_agent_experiment(task_name: str, config: RunConfig, output_root: 
                     "rolling_improvement_rate": rolling_improvement_rate,
                     "mutation_fallback_active": mutation_fallback_active,
                     "mutation_mode": mutation_mode,
+                    "llm_budget_remaining": llm_budget_remaining,
                     "hard_failure": candidate_eval.hard_failure,
                     "execution_status": candidate_eval.execution_status,
+                    "error_type": candidate_eval.error_type,
+                    "error_detail": candidate_eval.error_detail,
                 },
             )
 
@@ -645,6 +712,8 @@ def run_single_agent_experiment(task_name: str, config: RunConfig, output_root: 
         step=0,
         payload={"completed_tasks": completed_tasks},
     )
+    if pool is not None:
+        pool.stop()
     return RunSummary(run_id=run_id, log_path=log_path, completed_tasks=completed_tasks)
 
 
@@ -696,6 +765,7 @@ def _evaluate_population(
     organisms: list[OrganismState] | list[str],
     task: TaskSpec,
     config: RunConfig,
+    pool: DockerPool | None = None,
 ) -> list[OrganismState]:
     normalized: list[OrganismState] = []
     if organisms and isinstance(organisms[0], str):
@@ -717,7 +787,13 @@ def _evaluate_population(
         normalized = list(organisms)  # type: ignore[arg-type]
 
     def _evaluate_one(organism: OrganismState) -> OrganismState:
-        result = evaluate_candidate(organism.code, task=task, edit_cost=0.0, config=config)
+        result = evaluate_candidate(
+            organism.code,
+            task=task,
+            edit_cost=0.0,
+            config=config,
+            pool=pool,
+        )
         return OrganismState(
             code=organism.code,
             fitness=result.fitness,
@@ -779,7 +855,12 @@ def _initialize_population_for_task(
         if attempts > config.population_size * 20:
             population_codes.append(bootstrap_code)
             continue
-        candidate = _mutate_code(bootstrap_code, rng, intensity=1)
+        candidate, _llm_used = _mutate_code(
+            bootstrap_code,
+            rng,
+            intensity=1,
+            enable_semantic=config.enable_semantic_mutation,
+        )
         if validate_candidate(candidate).is_valid:
             population_codes.append(candidate)
     organisms: list[OrganismState] = []
@@ -822,19 +903,30 @@ def run_population_experiment(task_name: str, config: RunConfig, output_root: Pa
     current_task_names = list(tasks)
     current_task_index = current_task_names.index(task_name)
     id_counter = [0]
+    pool: DockerPool | None = None
+    if config.use_persistent_docker and config.sandbox_backend == "docker":
+        pool = DockerPool(config)
+        pool.start()
 
     while current_task_index < len(current_task_names):
         task = tasks[current_task_names[current_task_index]]
         recent_diversity: deque[float] = deque(maxlen=max(1, config.diversity_window))
         recent_best_fitness: deque[float] = deque(maxlen=max(1, config.convergence_patience))
         seed_population = _initialize_population_for_task(task, config, rng, id_counter)
-        population = _evaluate_population(seed_population, task, config)
+        population = _evaluate_population(seed_population, task, config, pool=pool)
+        initial_mean_depth = (
+            statistics.fmean([ast_max_depth(o.code) for o in population]) if population else 0.0
+        )
 
         unlocked = False
         for generation in range(config.max_generations + 1):
             best = max(population, key=lambda item: item.fitness)
             fitnesses = [item.fitness for item in population]
-            metrics = compute_generation_metrics(population, novelty_k=config.novelty_k)
+            metrics = compute_generation_metrics(
+                population,
+                novelty_k=config.novelty_k,
+                initial_mean_depth=initial_mean_depth,
+            )
             recent_diversity.append(metrics.structural_diversity_ratio)
             recent_best_fitness.append(best.fitness)
 
@@ -874,6 +966,9 @@ def run_population_experiment(task_name: str, config: RunConfig, output_root: Pa
                     "mean_novelty": metrics.mean_novelty,
                     "max_lineage_depth": metrics.max_lineage_depth,
                     "mean_lineage_depth": metrics.mean_lineage_depth,
+                    "kolmogorov_complexity_proxy": metrics.kolmogorov_complexity_proxy,
+                    "cumulative_complexity_delta": metrics.cumulative_complexity_delta,
+                    "code_token_zipf_coefficient": metrics.code_token_zipf_coefficient,
                 },
             )
             _emit_event(
@@ -978,7 +1073,12 @@ def run_population_experiment(task_name: str, config: RunConfig, output_root: Pa
                         payload={"generation": generation, "parent_ids": parent_ids},
                     )
                 if rng.random() < config.mutation_rate:
-                    child_code = _mutate_code(child_code, rng, intensity=1)
+                    child_code, _llm_used = _mutate_code(
+                        child_code,
+                        rng,
+                        intensity=1,
+                        enable_semantic=config.enable_semantic_mutation,
+                    )
 
                 validation = validate_candidate(child_code)
                 if not validation.is_valid:
@@ -1000,7 +1100,7 @@ def run_population_experiment(task_name: str, config: RunConfig, output_root: Pa
                     )
                 )
 
-            population = _evaluate_population(next_organisms, task, config)
+            population = _evaluate_population(next_organisms, task, config, pool=pool)
 
         if not unlocked or not config.run_curriculum:
             break
@@ -1016,6 +1116,8 @@ def run_population_experiment(task_name: str, config: RunConfig, output_root: Pa
         step=0,
         payload={"completed_tasks": completed_tasks},
     )
+    if pool is not None:
+        pool.stop()
     return RunSummary(run_id=run_id, log_path=log_path, completed_tasks=completed_tasks)
 
 

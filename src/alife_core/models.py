@@ -60,6 +60,12 @@ class RunConfig:
     convergence_entropy_floor: float = 0.15
     convergence_fitness_delta_floor: float = 0.005
 
+    use_persistent_docker: bool = False
+    enable_semantic_mutation: bool = False
+
+    llm_mutation_rate: float = 0.05
+    llm_mutation_budget: int = 20
+
 
 @dataclass(frozen=True)
 class TaskSpec:
@@ -87,6 +93,8 @@ class EvaluationResult:
         "missing_function",
         "internal_error",
     ] = "ok"
+    error_type: str = ""
+    error_detail: str = ""
 
 
 @dataclass(frozen=True)

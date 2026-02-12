@@ -35,7 +35,7 @@ def _measure_task(
     non_destructive_count = 0
 
     for _ in range(samples):
-        candidate = _mutate_code(base_code, rng, intensity=1)
+        candidate, _ = _mutate_code(base_code, rng, intensity=1)
         validation = validate_candidate(candidate)
         if not validation.is_valid:
             continue
@@ -58,7 +58,7 @@ def _measure_task(
         code = base_code
         survived = 0
         for _depth in range(chain_depth):
-            code = _mutate_code(code, rng, intensity=1)
+            code, _ = _mutate_code(code, rng, intensity=1)
             validation = validate_candidate(code)
             if not validation.is_valid:
                 break

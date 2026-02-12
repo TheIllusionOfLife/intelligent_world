@@ -304,7 +304,7 @@ def test_mutate_code_can_adjust_comparison_operator() -> None:
 
     source = "def solve(x, y):\n    if x < y:\n        return x\n    return y\n"
 
-    mutated = runtime._mutate_code(source, FakeRng(), intensity=1)
+    mutated, _llm = runtime._mutate_code(source, FakeRng(), intensity=1)
 
     assert "if x < y" not in mutated
 
@@ -463,7 +463,7 @@ def test_evaluate_population_uses_parallel_workers(monkeypatch) -> None:
     active = 0
     max_active = 0
 
-    def fake_evaluate(code, task, edit_cost, config):
+    def fake_evaluate(code, task, edit_cost, config, pool=None):
         nonlocal active, max_active
         _ = code
         _ = task
@@ -537,7 +537,7 @@ def test_population_mode_checks_final_generation_candidate(monkeypatch, tmp_path
         lambda *_args, **_kwargs: init_codes,
     )
 
-    def fake_evaluate_population(codes, task_obj, config):
+    def fake_evaluate_population(codes, task_obj, config, pool=None):
         _ = codes
         _ = task_obj
         _ = config
@@ -565,7 +565,10 @@ def test_population_mode_checks_final_generation_candidate(monkeypatch, tmp_path
     monkeypatch.setattr(
         runtime,
         "_mutate_code",
-        lambda code, rng, intensity=1, prefer_structural=False: code,
+        lambda code, rng, intensity=1, prefer_structural=False, enable_semantic=False, **kw: (
+            code,
+            0,
+        ),
     )
 
     config = RunConfig(
@@ -795,7 +798,7 @@ def test_evaluate_population_skips_pre_evaluated_organisms(monkeypatch) -> None:
 
     calls = {"count": 0}
 
-    def fake_evaluate(code, task, edit_cost, config):
+    def fake_evaluate(code, task, edit_cost, config, pool=None):
         _ = code
         _ = task
         _ = edit_cost
