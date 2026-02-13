@@ -260,7 +260,7 @@ class TestRunCampaign:
             call_count["n"] += 1
             if call_count["n"] == 1:
                 raise RuntimeError("Simulated failure")
-            log_path = output_dir / "logs" / f"run-{call_count['n']}.jsonl"
+            log_path = output_root / "logs" / f"run-{call_count['n']}.jsonl"
             log_path.parent.mkdir(parents=True, exist_ok=True)
             events = [
                 {
