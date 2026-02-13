@@ -6,6 +6,9 @@ import statistics
 from collections import defaultdict
 from pathlib import Path
 
+_GO_THRESHOLD = 0.6
+_CONDITIONAL_GO_THRESHOLD = 0.3
+
 
 def analyze_campaign(results_dir: Path, output_path: Path) -> dict:
     """Read summary.json, compute statistics, and generate a markdown report.
@@ -152,14 +155,14 @@ def _render_report(
 
     # Recommendation
     lines.append("## Recommendation\n")
-    if best_rate >= 0.6:
+    if best_rate >= _GO_THRESHOLD:
         lines.append(
             f"**GO** — Config {best_config} achieves {best_rate:.1%} success rate "
             f"across all tasks. The system demonstrates viable evolutionary "
             f"optimization. Recommended next steps: scale to harder tasks, "
             f"tune hyperparameters for underperforming configurations."
         )
-    elif best_rate >= 0.3:
+    elif best_rate >= _CONDITIONAL_GO_THRESHOLD:
         lines.append(
             f"**CONDITIONAL GO** — Config {best_config} achieves {best_rate:.1%} "
             f"success rate. Results are promising but inconsistent. "

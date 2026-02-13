@@ -86,21 +86,6 @@ def extract_run_metrics(log_path: Path, mode: str) -> dict:
     except (OSError, FileNotFoundError):
         text = ""
 
-    if not text:
-        result: dict = {
-            "best_fitness": 0.0,
-            "best_train_pass_ratio": 0.0,
-            "best_hidden_pass_ratio": 0.0,
-        }
-        if mode == "single_agent":
-            result["total_steps"] = 0
-            result["final_energy"] = 0.0
-        else:
-            result["total_generations"] = 0
-            result["convergence_reason"] = None
-            result["diversity_trajectory"] = []
-        return result
-
     for line in text.split("\n"):
         try:
             event = json.loads(line)
