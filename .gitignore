@@ -12,3 +12,4 @@ logs/
 organisms/
 sweep_runs/
 sweep_summary.json
+campaign_results/
